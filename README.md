@@ -24,27 +24,23 @@ Queries are sent to `localhost:25566` as JSON lines (1 JSON object per line). Re
 ```
 
 ### Example response:
-```
-json
+```json
 { "inventory": { "slots": [...], "selected": 0 } }
 ```
 
 ## 📘 Available Queries
 #### inventory
 Get the player's inventory contents.
-```
-json
+```json
 { "type": "inventory" }
 position
 Get the player's current position and rotation.
 ```
-```
-json
+```json
 { "type": "position" }
 ```
 Returns:
-```
-json
+```json
 {
   "position": {
     "x": 123.0,
@@ -58,8 +54,7 @@ json
 
 #### blocks
 Get a 3D array of blocks around the player.
-```
-json
+```json
 { "type": "blocks", "range": 5 }
 ```
 Optional:
@@ -68,8 +63,7 @@ range: Integer radius (default: 5)
 
 #### entities
 Get nearby entities and their data.
-```
-json
+```json
 { "type": "entities", "range": 10 }
 ```
 Optional:
@@ -79,15 +73,13 @@ range: Integer radius (default: 10)
 #### world_info
 Get general information about the world (dimension, time, etc.).
 
-```
-json
+```json
 { "type": "world_info" }
 ```
 #### send_chat
 Send a message into the in-game chat.
 
-```
-json
+```json
 { "type": "send_chat", "message": "Hello from Python!" }
 ```
 
@@ -95,19 +87,16 @@ json
 Drop an item from inventory.
 
 By slot:
-```
-json
+```json
 { "type": "drop_item", "slot": 3 }
 ```
 By item name:
-```
-json
+```json
 { "type": "drop_item", "name": "minecraft:stone" }
 ```
 #### rotate
 Rotate the player’s view.
-```
-json
+```json
 {
   "type": "rotate",
   "yaw": 90.0,
@@ -120,14 +109,12 @@ yaw, pitch: Defaults to current orientation if omitted.
 
 #### point_to_entity
 Rotate the player to face a specific entity by UUID.
-```
-json
+```json
 { "type": "point_to_entity", "uuid": "a1b2c3d4-..." }
 ```
 #### point_to_xyz
 Rotate the player to face specific world coordinates.
-```
-json
+```json
 {
   "type": "point_to_xyz",
   "x": 123.0,
@@ -137,13 +124,11 @@ json
 ```
 #### get_screen_pos
 Get the on-screen pixel position of a specific inventory slot.
-```
-json
+```json
 { "type": "get_screen_pos", "slot": 0 }
 ```
 ## 🐍 Sample Python Client
-```
-python
+```python
 import socket
 import json
 from typing import Any, Dict, Optional
@@ -184,8 +169,7 @@ if __name__ == "__main__":
 ## 🧪 Testing
 Once Minecraft is running with the mod:
 
-```
-bash
+```bash
 curl -X POST --data '{"type": "position"}' localhost:25566
 ```
 Or use the Python script above for richer integration.
