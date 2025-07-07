@@ -14,6 +14,12 @@
 
 ---
 
+## Running
+
+The query server will start automatically on `localhost:25566` whenever you enter a game (joining a singleplayer or multiplayer world.
+
+---
+
 ## 📡 Query Protocol
 
 Queries are sent to `localhost:25566` as JSON lines (1 JSON object per line). Responses are returned in the same format.
@@ -33,6 +39,37 @@ Queries are sent to `localhost:25566` as JSON lines (1 JSON object per line). Re
 Get the player's inventory contents.
 ```json
 { "type": "inventory" }
+```
+Returns:
+```json
+{
+  "inventory": {
+    "items": [
+      {
+        "slot": 0,
+        "type": "minecraft:diamond_sword",
+        "name": "Super Fancy Sword",
+        "count": 1,
+        "damage": 17,
+        "maxDamage": 990,
+        "durability": 973,
+        "enchanted": true
+      },
+      {
+        "slot": 1,
+        "type": "minecraft:diamond_shovel",
+        "name": "My Favorite Spoon",
+        "count": 1,
+        "damage": 3,
+        "maxDamage": 990,
+        "durability": 987,
+        "enchanted": true
+      },
+      ...
+    ],
+    "selected": 0 
+  }
+}
 ```
 ### position
 Get the player's current position and rotation.
@@ -61,6 +98,34 @@ Optional:
 
 range: Integer radius (default: 5)
 
+Returns:
+```json
+{
+  "blocks": {
+    "blocks": [
+      {
+        "x": -182,
+        "y": 102,
+        "z": 12,
+        "type": "Block{minecraft:spruce_slab}"
+      },
+      {
+        "x": -182,
+        "y": 102,
+        "z": 14,
+        "type": "Block{minecraft:crafting_table}"
+      },
+      {
+        "x": -182,
+        "y": 103,
+        "z": 12,
+        "type": "Block{minecraft:air}"
+      }
+    ]
+  }
+}
+```
+
 ### entities
 Get nearby entities and their data.
 ```json
@@ -70,17 +135,63 @@ Optional:
 
 range: Integer radius (default: 10)
 
+Returns:
+```json
+{
+  "entities": {
+    "entities": [
+      {
+        "type": "entity.minecraft.villager",
+        "name": "Fletcher",
+        "x": -182.30000001192093,
+        "y": 103.0,
+        "z": 15.667358260097222,
+        "health": 20.0,
+        "maxHealth": 20.0,
+        "uuid": "2e290bd5-81f5-4166-bc25-806818f1d958",
+        "hostile": false,
+        "passive": true,
+        "neutral": false,
+        "isPlayer": false
+      }
+    ]
+  }
+}
+```
+
 ### world_info
 Get general information about the world (dimension, time, etc.).
 
 ```json
 { "type": "world_info" }
 ```
+Returns:
+```json
+{
+  "world_info": {
+    "dimension": "minecraft:overworld",
+    "time": 4154384,
+    "isDay": true,
+    "isRaining": false,
+    "isThundering": false,
+    "difficulty": "NORMAL"
+  }
+}
+```
 ### send_chat
 Send a message into the in-game chat.
 
 ```json
-{ "type": "send_chat", "message": "Hello from Python!" }
+{ "type": "send_chat", "message": "Hello World!" }
+```
+Returns:
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Sent: Hello World!"
+  }
+}
 ```
 
 ### drop_item (TO BE IMPLEMENTED)
@@ -103,29 +214,74 @@ Rotate the player’s view.
   "pitch": 0.0
 }
 ```
-Optional:
-
-yaw, pitch: Defaults to current orientation if omitted.
-
-### point_to_entity
-Rotate the player to face a specific entity by UUID.
-```json
-{ "type": "point_to_entity", "uuid": "a1b2c3d4-..." }
-```
-### point_to_xyz
-Rotate the player to face specific world coordinates.
+Returns:
 ```json
 {
-  "type": "point_to_xyz",
-  "x": 123.0,
-  "y": 64.0,
-  "z": 456.0
+  "result": {
+    "success": true,
+    "message": "Rotated player to yaw: 90.0\u00b0, pitch: 0.0\u00b0",
+    "yaw": 90.0,
+    "pitch": 0.0
+  }
 }
 ```
-### get_screen_pos
-Get the on-screen pixel position of a specific inventory slot.
+
+### point_to_entity
+Rotates the player to point at an entity with a specific UUID (hint: the `entities` query returns UUIDs). This search for an entity of that UUID within 100 blocks, and it will point the crosshair at the center of that entity (entity's height divided by 2).
 ```json
-{ "type": "get_screen_pos", "slot": 0 }
+{ "type": "point_to_entity", "uuid": "2e290bd5-81f5-4166-bc25-806818f1d958" }
+```
+Returns:
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Pointed to entity: Fletcher",
+    "entityName": "Fletcher",
+    "entityType": "entity.minecraft.villager",
+    "distance": 2.93,
+    "yaw": 28.57,
+    "pitch": 12.7,
+    "entityX": -182.30000001192093,
+    "entityY": 103.0,
+    "entityZ": 15.667358260097222
+  }
+}
+```
+
+### point_to_xyz
+Rotates the player to point the crosshair at a target coordinate
+```json
+{ "type": "point_to_xyz", "x": 42, "y": 69, "z": -42.2 }
+```
+As you can see from the above example, the coordinates can accept both integers and floats.
+
+Example Response:
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Pointed to location: 42.0 69.0 -42.2",
+    "distance": 232.45,
+    "yaw": 256.06,
+    "pitch": 8.81
+  }
+}
+```
+
+### get_screen_pos (WIP)
+Gets the screen position of a specific inventory slot. Screen position is returned in pixels. This is still a work in progress, so approach this one with caution.
+```json
+{ "type": "get_screen_pos", "slot": 5 }
+```
+Example Response:
+```json
+{
+  "result": {
+    "x": 223,
+    "y": 179
+  }
+}
 ```
 ## 🐍 Sample Python Client
 ```python
@@ -182,10 +338,3 @@ MIT License — Free to use and modify.
 
 ✨ Contributions
 Pull requests welcome! Add more query types, optimize performance, or support additional Minecraft features.
-
-
-
-
-
-
-
