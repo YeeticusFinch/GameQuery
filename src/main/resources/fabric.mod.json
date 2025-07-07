@@ -1,0 +1,41 @@
+{
+	"schemaVersion": 1,
+	"id": "gamequery",
+	"version": "${version}",
+	"name": "GameQuery",
+	"description": "A mod that provides a query port for external applications",
+	"authors": [
+		"carl_alex"
+	],
+	"contact": {
+		"homepage": "fancy.lerdorf.com",
+		"sources": "https://github.com/YeeticusFinch"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/gamequery/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.lerdorf.GameQueryMod"
+		],
+		"client": [
+			"com.lerdorf.GameQueryModClient"
+		]
+	},
+	"mixins": [
+		"gamequery.mixins.json",
+		{
+			"config": "gamequery.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.16.14",
+		"minecraft": "~1.21.6",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"another-mod": "*"
+	}
+}
