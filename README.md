@@ -338,3 +338,5 @@ MIT License — Free to use and modify.
 
 ✨ Contributions
 Pull requests welcome! Add more query types, optimize performance, or support additional Minecraft features.
+
+Check out this project on Modrinth: https://modrinth.com/mod/gamequery
