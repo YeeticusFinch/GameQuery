@@ -29,13 +29,13 @@ Queries are sent to `localhost:25566` as JSON lines (1 JSON object per line). Re
 ```
 
 ## 📘 Available Queries
-#### inventory
+### inventory
 Get the player's inventory contents.
 ```json
 { "type": "inventory" }
-position
-Get the player's current position and rotation.
 ```
+### position
+Get the player's current position and rotation.
 ```json
 { "type": "position" }
 ```
@@ -52,7 +52,7 @@ Returns:
 }
 ```
 
-#### blocks
+### blocks
 Get a 3D array of blocks around the player.
 ```json
 { "type": "blocks", "range": 5 }
@@ -61,7 +61,7 @@ Optional:
 
 range: Integer radius (default: 5)
 
-#### entities
+### entities
 Get nearby entities and their data.
 ```json
 { "type": "entities", "range": 10 }
@@ -70,20 +70,20 @@ Optional:
 
 range: Integer radius (default: 10)
 
-#### world_info
+### world_info
 Get general information about the world (dimension, time, etc.).
 
 ```json
 { "type": "world_info" }
 ```
-#### send_chat
+### send_chat
 Send a message into the in-game chat.
 
 ```json
 { "type": "send_chat", "message": "Hello from Python!" }
 ```
 
-#### drop_item (TO BE IMPLEMENTED)
+### drop_item (TO BE IMPLEMENTED)
 Drop an item from inventory.
 
 By slot:
@@ -94,7 +94,7 @@ By item name:
 ```json
 { "type": "drop_item", "name": "minecraft:stone" }
 ```
-#### rotate
+### rotate
 Rotate the player’s view.
 ```json
 {
@@ -107,12 +107,12 @@ Optional:
 
 yaw, pitch: Defaults to current orientation if omitted.
 
-#### point_to_entity
+### point_to_entity
 Rotate the player to face a specific entity by UUID.
 ```json
 { "type": "point_to_entity", "uuid": "a1b2c3d4-..." }
 ```
-#### point_to_xyz
+### point_to_xyz
 Rotate the player to face specific world coordinates.
 ```json
 {
@@ -122,7 +122,7 @@ Rotate the player to face specific world coordinates.
   "z": 456.0
 }
 ```
-#### get_screen_pos
+### get_screen_pos
 Get the on-screen pixel position of a specific inventory slot.
 ```json
 { "type": "get_screen_pos", "slot": 0 }
