@@ -6,6 +6,9 @@ import com.google.gson.JsonObject;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.util.ActionResult;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.world.World;
@@ -167,6 +170,23 @@ public class QueryClient {
 						syncResponse.addProperty("error", "get_screen_pos requires either 'slot' parameter");
 					}
 					break;
+				case "left_click":
+					syncResponse.add("result", performLeftClick());
+					break;
+				case "right_click":
+					syncResponse.add("result", performRightClick());
+					break;
+				case "select_slot":
+					if (query.has("slot")) {
+						int slot = query.get("slot").getAsInt();
+						syncResponse.add("result", selectHotbarSlot(slot));
+					} else {
+						syncResponse.addProperty("error", "select_slot requires 'slot' parameter");
+					}
+					break;
+				case "hotbar":
+					syncResponse.add("hotbar", getHotbarItems());
+					break;
 				default:
 					syncResponse.addProperty("error", "Unknown query type: " + type);
 				}
@@ -182,6 +202,104 @@ public class QueryClient {
 		}
 	}
 	
+	private JsonElement performLeftClick() {
+		JsonObject result = new JsonObject();
+		try {
+			if (client.crosshairTarget != null && client.crosshairTarget.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK) {
+				BlockHitResult hit = (BlockHitResult) client.crosshairTarget;
+				client.interactionManager.attackBlock(hit.getBlockPos(), hit.getSide());
+				client.player.swingHand(client.player.getActiveHand()); // Animation
+				result.addProperty("success", true);
+				result.addProperty("message", "Attacked block at " + hit.getBlockPos());
+			} else if (client.crosshairTarget != null && client.crosshairTarget.getType() == net.minecraft.util.hit.HitResult.Type.ENTITY) {
+				EntityHitResult hit = (EntityHitResult) client.crosshairTarget;
+				client.interactionManager.attackEntity(client.player, hit.getEntity());
+				client.player.swingHand(client.player.getActiveHand()); // Animation
+				result.addProperty("success", true);
+				result.addProperty("message", "Attacked entity: " + hit.getEntity().getName().getString());
+			} else {
+				result.addProperty("success", false);
+				result.addProperty("error", "No block or entity targeted for left click");
+			}
+		} catch (Exception e) {
+			result.addProperty("success", false);
+			result.addProperty("error", "Failed left click: " + e.getMessage());
+		}
+		return result;
+	}
+	
+	private JsonElement performRightClick() {
+		JsonObject result = new JsonObject();
+		try {
+			if (client.crosshairTarget != null && client.crosshairTarget.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK) {
+				BlockHitResult hit = (BlockHitResult) client.crosshairTarget;
+				ActionResult action = client.interactionManager.interactBlock(client.player, client.player.getActiveHand(), hit);
+				client.player.swingHand(client.player.getActiveHand());
+				result.addProperty("success", true);
+				result.addProperty("message", "Right-clicked block at " + hit.getBlockPos() + " (result: " + action + ")");
+			} else if (client.crosshairTarget != null && client.crosshairTarget.getType() == net.minecraft.util.hit.HitResult.Type.ENTITY) {
+				EntityHitResult hit = (EntityHitResult) client.crosshairTarget;
+				ActionResult action = client.interactionManager.interactEntity(client.player, hit.getEntity(), client.player.getActiveHand());
+				client.player.swingHand(client.player.getActiveHand());
+				result.addProperty("success", true);
+				result.addProperty("message", "Right-clicked entity: " + hit.getEntity().getName().getString() + " (result: " + action + ")");
+			} else {
+				// Default to using the item in the air
+				ActionResult action = client.interactionManager.interactItem(client.player, client.player.getActiveHand());
+				client.player.swingHand(client.player.getActiveHand());
+				result.addProperty("success", true);
+				result.addProperty("message", "Used item in air (result: " + action + ")");
+			}
+		} catch (Exception e) {
+			result.addProperty("success", false);
+			result.addProperty("error", "Failed right click: " + e.getMessage());
+		}
+		return result;
+	}
+
+	
+	private JsonObject selectHotbarSlot(int slot) {
+		JsonObject result = new JsonObject();
+		ClientPlayerEntity player = client.player;
+
+		if (player == null) {
+			result.addProperty("success", false);
+			result.addProperty("error", "Player not available");
+			return result;
+		}
+
+		if (slot < 0 || slot > 8) {
+			result.addProperty("success", false);
+			result.addProperty("error", "Slot must be between 0 and 8");
+			return result;
+		}
+
+		player.getInventory().setSelectedSlot(slot);
+		result.addProperty("success", true);
+		result.addProperty("message", "Selected hotbar slot " + slot);
+		return result;
+	}
+	
+	private JsonObject getHotbarItems() {
+		JsonObject hotbarData = new JsonObject();
+		List<JsonObject> items = new ArrayList<>();
+
+		ClientPlayerEntity player = client.player;
+
+		for (int i = 0; i < 9; i++) {
+			ItemStack stack = player.getInventory().getStack(i);
+			JsonObject item = new JsonObject();
+			item.addProperty("slot", i);
+			item.addProperty("type", stack.isEmpty() ? "empty" : sanitizeString(stack.getItem().toString()));
+			item.addProperty("name", stack.isEmpty() ? "empty" : sanitizeString(stack.getName().getString()));
+			item.addProperty("count", stack.getCount());
+			items.add(item);
+		}
+
+		hotbarData.add("items", gson.toJsonTree(items));
+		return hotbarData;
+	}
+
 	private JsonObject pointToXYZ(float x, float y, float z) {
 		JsonObject result = new JsonObject();
         
