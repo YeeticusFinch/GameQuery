@@ -2,10 +2,15 @@ package com.lerdorf;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
 import net.minecraft.client.MinecraftClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.minecraft.client.toast.SystemToast;
+import net.minecraft.client.toast.Toast;
+import net.minecraft.text.Text;
 
 public class GameQueryModClient implements ClientModInitializer {
     public static final String MOD_ID = "gamequery";
@@ -13,6 +18,18 @@ public class GameQueryModClient implements ClientModInitializer {
     
     private QueryClient queryClient;
     
+    private boolean wasInWorld = false;
+    
+    private void showToast(String title, String message) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        client.getToastManager().add(new SystemToast(
+            SystemToast.Type.PERIODIC_NOTIFICATION, 
+            Text.literal(title), 
+            Text.literal(message)
+        ));
+    }
+    
+    /*
     @Override
     public void onInitializeClient() {
         LOGGER.info("GameQuery client mod initializing...");
@@ -27,6 +44,35 @@ public class GameQueryModClient implements ClientModInitializer {
             onWorldLeft(client);
         });
         
+        // Start the query server when any world (SP or MP) is loaded
+        ClientWorldEvents.LOAD.register((client, world) -> {
+            onWorldJoined(MinecraftClient.getInstance());
+        });
+
+        // Stop the query server when any world is unloaded
+        ClientWorldEvents.UNLOAD.register((client, world) -> {
+            onWorldLeft(MinecraftClient.getInstance());
+        });
+        
+        LOGGER.info("GameQuery client mod initialized!");
+    }
+    */
+    @Override
+    public void onInitializeClient() {
+        LOGGER.info("GameQuery client mod initializing...");
+
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            boolean isInWorld = client.world != null && client.player != null;
+
+            if (isInWorld && !wasInWorld) {
+                onWorldJoined(client);
+            } else if (!isInWorld && wasInWorld) {
+                onWorldLeft(client);
+            }
+
+            wasInWorld = isInWorld;
+        });
+
         LOGGER.info("GameQuery client mod initialized!");
     }
     
@@ -34,6 +80,7 @@ public class GameQueryModClient implements ClientModInitializer {
         if (queryClient == null) {
             queryClient = new QueryClient(client, 25566); // Port 25566
             queryClient.start();
+            showToast("GameQuery", "Client mod initialized!");
             LOGGER.info("Client query server started on port 25566");
         }
     }
@@ -42,6 +89,7 @@ public class GameQueryModClient implements ClientModInitializer {
         if (queryClient != null) {
             queryClient.stop();
             queryClient = null;
+            showToast("GameQuery", "Client mod de-initialized!");
             LOGGER.info("Client query server stopped");
         }
     }

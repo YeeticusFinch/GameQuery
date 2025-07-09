@@ -7,6 +7,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.BlockPos;
@@ -15,6 +16,7 @@ import net.minecraft.world.World;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.component.ComponentMap;
 import net.minecraft.inventory.Inventory;
+import net.minecraft.item.BowItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.MobEntity;
@@ -29,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class QueryClient {
 	private final MinecraftClient client;
@@ -170,6 +173,51 @@ public class QueryClient {
 						syncResponse.addProperty("error", "get_screen_pos requires either 'slot' parameter");
 					}
 					break;
+				case "get_block":
+					if (query.has("x") && query.has("y") && query.has("z")) {
+						int bx = (int)query.get("x").getAsFloat();
+		                int by = (int)query.get("y").getAsFloat();
+		                int bz = (int)query.get("z").getAsFloat();
+		                
+		                ClientPlayerEntity player = client.player;
+		        		ClientWorld world = client.world;
+		                
+		                BlockPos pos = new BlockPos(bx, by, bz);
+		                
+		                // Safely get block type with sanitization
+						String blockType = sanitizeString(world.getBlockState(pos).getBlock().toString());
+						syncResponse.addProperty("type", blockType);
+
+						// Check if it's a container (only if we can access it)
+						BlockEntity blockEntity = world.getBlockEntity(pos);
+						if (blockEntity instanceof Inventory) {
+							Inventory inventory = (Inventory) blockEntity;
+							List<JsonObject> contents = new ArrayList<>();
+
+							try {
+								for (int i = 0; i < inventory.size(); i++) {
+									ItemStack stack = inventory.getStack(i);
+									if (!stack.isEmpty()) {
+										JsonObject item = new JsonObject();
+										item.addProperty("slot", i);
+										item.addProperty("type", sanitizeString(stack.getItem().toString()));
+										item.addProperty("name", sanitizeString(stack.getName().getString()));
+										item.addProperty("count", stack.getCount());
+										contents.add(item);
+									}
+								}
+
+								syncResponse.add("contents", gson.toJsonTree(contents));
+							} catch (Exception e) {
+								// Skip container contents if there's an error
+								syncResponse.addProperty("contents_error", "Could not read container contents");
+							}
+						}
+	                    break;
+					} else {
+						syncResponse.addProperty("error", "get_block requires 'x' 'y' 'z' parameters");
+					}
+					break;
 				case "left_click":
 					syncResponse.add("result", performLeftClick());
 					break;
@@ -187,6 +235,33 @@ public class QueryClient {
 				case "hotbar":
 					syncResponse.add("hotbar", getHotbarItems());
 					break;
+				case "open_container":
+					syncResponse.add("result", openContainerUnderCrosshair());
+					break;
+				case "attack":
+					syncResponse.add("result", attackEntityUnderCrosshair());
+					break;
+				case "shoot_bow":
+	                float overshoot = query.has("overshoot") ? query.get("overshoot").getAsFloat() : 0;
+					if (query.has("x") && query.has("y") && query.has("z")) {
+						float tx = query.get("x").getAsFloat();
+		                float ty = query.get("y").getAsFloat();
+		                float tz = query.get("z").getAsFloat();
+	                    syncResponse.add("result", shootBowAt(tx, ty, tz, overshoot));
+	                    break;
+					} else if (query.has("entity")) {
+						String targetUuid = query.has("entity") ? query.get("entity").getAsString() : "";
+						LivingEntity targetEntity = getLivingEntity(targetUuid);
+						if (targetEntity != null) {
+		                    syncResponse.add("result", shootBowAt(targetEntity, overshoot));
+						} else {
+							syncResponse.addProperty("error", "entity not found - " + targetUuid);
+						}
+						
+					} else {
+						syncResponse.addProperty("error", "shoot_bow requires either 'x' 'y' 'z' parameters or 'entity' parameter");
+					}
+					break;
 				default:
 					syncResponse.addProperty("error", "Unknown query type: " + type);
 				}
@@ -200,6 +275,278 @@ public class QueryClient {
 			response.addProperty("error", "Error processing query: " + e.getMessage());
 			return response;
 		}
+	}
+	
+	double getBowPitch(double range) {
+		if (range <= 24)
+			return 0;
+		if (range >= 118)
+			return 40;
+        double a = -0.431995;
+        double n = 0.883404;
+        double b = (-1.39985)*Math.pow(10, -22);
+        double m = 11.15095;
+        double c = 6.72811;
+        return a*Math.pow(range, n) + b*Math.pow(range, m) + c;
+	}
+	
+	public JsonElement shootBowAt(LivingEntity target, float overshoot) {
+		JsonObject result = new JsonObject();
+	    ClientPlayerEntity player = client.player;
+
+	    // Step 1: Find bow and switch to that slot
+	    int bowSlot = -1;
+	    for (int i = 0; i < player.getInventory().size(); i++) {
+	        ItemStack stack = player.getInventory().getStack(i);
+	        if (stack.getItem() instanceof BowItem) {
+	            bowSlot = i;
+	            break;
+	        }
+	    }
+	    if (bowSlot == -1) {
+	        System.out.println("No bow found in inventory.");
+	        result.addProperty("error", "no bow found in inventory");
+	        return result;
+	    }
+
+        result.addProperty("bow_slot", bowSlot);
+	    int finalBowSlot = bowSlot;
+	    
+	    client.execute(() -> {
+	        try {
+	            player.getInventory().setSelectedSlot(finalBowSlot);
+
+	            // Step 2: Aim at target
+	            JsonObject rotationResult = pointToXYZ((float)target.getX(), (float)(target.getY()+target.getHeight()), (float)target.getZ());
+	            if (!rotationResult.get("success").getAsBoolean()) {
+	                System.out.println("Failed to rotate toward target.");
+	    	        result.addProperty("error", "failed to rotate player");
+	                return;
+	            }
+	            
+	            rotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot + Math.sqrt(Math.pow(player.getX()-target.getX(), 2) + Math.pow(player.getZ()-target.getZ(), 2)))));
+	            if (!rotationResult.get("success").getAsBoolean()) {
+	                System.out.println("Failed to rotate toward target.");
+	    	        result.addProperty("error", "failed to rotate player");
+	                return;
+	            }
+	            
+	            
+	            // Step 3: Start drawing the bow
+	            client.interactionManager.interactItem(player, Hand.MAIN_HAND);
+
+	            // Continue aiming
+	            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+	                client.execute(() -> {
+	                	JsonObject newRotationResult = pointToXYZ((float)target.getX(), (float)(target.getY()+target.getHeight()), (float)target.getZ());
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	    	            
+	    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-target.getX(), 2) + Math.pow(player.getZ()-target.getZ(), 2)))));
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	                });
+	            }, 900, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+	            
+	            // Continue aiming
+	            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+	                client.execute(() -> {
+	                	JsonObject newRotationResult = pointToXYZ((float)target.getX(), (float)(target.getY()+target.getHeight()), (float)target.getZ());
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	    	            
+	    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-target.getX(), 2) + Math.pow(player.getZ()-target.getZ(), 2)))));
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	                });
+	            }, 1200, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+	            
+	            // Step 4 + 5: Wait and release
+	            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+	                client.execute(() -> {
+	                	JsonObject newRotationResult = pointToXYZ((float)target.getX(), (float)(target.getY()+target.getHeight()), (float)target.getZ());
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	    	            
+	    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-target.getX(), 2) + Math.pow(player.getZ()-target.getZ(), 2)))));
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	                    client.interactionManager.stopUsingItem(player);
+		    	        result.addProperty("success", "arrow has been launched");
+	                });
+	            }, 1300, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+	        } catch (Exception e) {
+	            e.printStackTrace();
+	        }
+	    });
+	    return result;
+	}
+	
+	public JsonElement shootBowAt(float targetX, float targetY, float targetZ, float overshoot) {
+		JsonObject result = new JsonObject();
+	    ClientPlayerEntity player = client.player;
+
+	    // Step 1: Find bow and switch to that slot
+	    int bowSlot = -1;
+	    for (int i = 0; i < player.getInventory().size(); i++) {
+	        ItemStack stack = player.getInventory().getStack(i);
+	        if (stack.getItem() instanceof BowItem) {
+	            bowSlot = i;
+	            break;
+	        }
+	    }
+	    if (bowSlot == -1) {
+	        System.out.println("No bow found in inventory.");
+	        result.addProperty("error", "no bow found in inventory");
+	        return result;
+	    }
+
+        result.addProperty("bow_slot", bowSlot);
+	    int finalBowSlot = bowSlot;
+	    
+	    client.execute(() -> {
+	        try {
+	            player.getInventory().setSelectedSlot(finalBowSlot);
+
+	            // Step 2: Aim at target
+	            JsonObject rotationResult = pointToXYZ(targetX, targetY, targetZ);
+	            if (!rotationResult.get("success").getAsBoolean()) {
+	                System.out.println("Failed to rotate toward target.");
+	    	        result.addProperty("error", "failed to rotate player");
+	                return;
+	            }
+	            
+	            rotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-targetX, 2) + Math.pow(player.getZ()-targetZ, 2)))));
+	            if (!rotationResult.get("success").getAsBoolean()) {
+	                System.out.println("Failed to rotate toward target.");
+	    	        result.addProperty("error", "failed to rotate player");
+	                return;
+	            }
+	            
+	            
+	            // Step 3: Start drawing the bow
+	            client.interactionManager.interactItem(player, Hand.MAIN_HAND);
+
+	            // Continue aiming
+	            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+	                client.execute(() -> {
+	                	JsonObject newRotationResult = pointToXYZ(targetX, targetY, targetZ);
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	                	newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-targetX, 2) + Math.pow(player.getZ()-targetZ, 2)))));
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	                });
+	            }, 900, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+	            
+	            // Continue aiming
+	            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+	                client.execute(() -> {
+	                	JsonObject newRotationResult = pointToXYZ(targetX, targetY, targetZ);
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	                	newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-targetX, 2) + Math.pow(player.getZ()-targetZ, 2)))));
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	                });
+	            }, 1200, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+	            
+	            // Step 4 + 5: Wait and release
+	            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+	                client.execute(() -> {
+	                	JsonObject newRotationResult = pointToXYZ(targetX, targetY, targetZ);
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	                	newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-targetX, 2) + Math.pow(player.getZ()-targetZ, 2)))));
+	    	            if (!newRotationResult.get("success").getAsBoolean()) {
+	    	                System.out.println("Failed to rotate toward target.");
+	    	    	        result.addProperty("error", "failed to rotate player");
+	    	                return;
+	    	            }
+	                    client.interactionManager.stopUsingItem(player);
+		    	        result.addProperty("success", "arrow has been launched");
+	                });
+	            }, 1300, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+	        } catch (Exception e) {
+	            e.printStackTrace();
+	        }
+	    });
+	    return result;
+	}
+	
+	private JsonElement openContainerUnderCrosshair() {
+		JsonObject result = new JsonObject();
+		try {
+			if (client.crosshairTarget instanceof BlockHitResult hit) {
+				ActionResult action = client.interactionManager.interactBlock(
+					client.player, client.player.getActiveHand(), hit);
+				client.player.swingHand(client.player.getActiveHand());
+
+				result.addProperty("success", true);
+				result.addProperty("message", "Interacted with block at " + hit.getBlockPos() + " (result: " + action + ")");
+			} else {
+				result.addProperty("success", false);
+				result.addProperty("error", "Not pointing at a block");
+			}
+		} catch (Exception e) {
+			result.addProperty("success", false);
+			result.addProperty("error", "Failed to open container: " + e.getMessage());
+		}
+		return result;
+	}
+	
+	private JsonElement attackEntityUnderCrosshair() {
+		JsonObject result = new JsonObject();
+		try {
+			if (client.crosshairTarget instanceof EntityHitResult hit) {
+				client.interactionManager.attackEntity(client.player, hit.getEntity());
+				client.player.swingHand(client.player.getActiveHand());
+
+				result.addProperty("success", true);
+				result.addProperty("message", "Attacked entity: " + hit.getEntity().getName().getString());
+				result.addProperty("uuid", hit.getEntity().getUuidAsString());
+			} else {
+				result.addProperty("success", false);
+				result.addProperty("error", "Not pointing at an entity");
+			}
+		} catch (Exception e) {
+			result.addProperty("success", false);
+			result.addProperty("error", "Failed to attack entity: " + e.getMessage());
+		}
+		return result;
 	}
 	
 	private JsonElement performLeftClick() {
@@ -357,6 +704,36 @@ public class QueryClient {
         
         return result;
 	}
+	
+	private LivingEntity getLivingEntity(String entityUuid) {
+		if (entityUuid == null || entityUuid.trim().isEmpty()) {
+            return null;
+        }
+        
+        try {
+            ClientPlayerEntity player = client.player;
+            ClientWorld world = client.world;
+            
+            if (player != null && world != null) {
+                //UUID targetUuid = UUID.fromString(entityUuid);
+                
+                // Search for the entity in a large area around the player
+                Box searchBox = new Box(player.getBlockPos()).expand(200);
+                List<LivingEntity> entities = world.getEntitiesByClass(LivingEntity.class, searchBox, 
+                    entity -> entity.getUuidAsString().equals(entityUuid));
+                
+                if (!entities.isEmpty()) {
+                    LivingEntity targetEntity = entities.get(0);
+                    
+                    return targetEntity;
+                }
+            } 
+        } catch (IllegalArgumentException e) {
+        } catch (Exception e) {
+        }
+        
+        return null;
+    }
 
 	private JsonObject pointToEntity(String entityUuid) {
         JsonObject result = new JsonObject();
