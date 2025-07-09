@@ -283,6 +283,170 @@ Example Response:
   }
 }
 ```
+
+### get_block
+Gets the block and some other information about the block at a specific coordinate in the same world as the player.
+```json
+{ "type": "get_block", "x": 42, "y": 69, "z": 42 }
+```
+Example Response:
+```json
+{
+  "type": "Block{minecraft:chest}",
+  "contents": []
+}
+```
+
+### left_click
+Performs a generic left click
+```json
+{"type": "left_click"}
+```
+Example Response (if it's a block on the crosshair):
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Attacked block at class_2339{x=-190, y=115, z=110}"
+  }
+}
+```
+Example Response (if it's an entity on the crosshair):
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Attacked entity: Armor Stand"
+  }
+}
+```
+
+### right_click
+Performs a generic right click
+```json
+{"type": "right_click"}
+```
+Example Response:
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Right-clicked entity: Armor Stand (result: class_9859[])"
+  }
+}
+```
+
+### select_slot
+Selects the hotbar slot by slot number (starting from 0, so numbers from 0-8 inclusive).
+```json
+{"type": "select_slot", "slot":1}
+```
+Example Response:
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Selected hotbar slot 1"
+  }
+}
+```
+
+### hotbaar
+Returns the items in the player's hotbar.
+```json
+{"type": "hotbar"}
+```
+Example Response:
+```json
+{
+  "hotbar": {
+    "items": [
+      {
+        "slot": 0,
+        "type": "minecraft:iron_sword",
+        "name": "Iron Sword",
+        "count": 1
+      },
+      {
+        "slot": 1,
+        "type": "minecraft:water_bucket",
+        "name": "Water Bucket",
+        "count": 1
+      },
+      {
+        "slot": 2,
+        "type": "minecraft:bow",
+        "name": "Bow",
+        "count": 1
+      },
+      {
+        "slot": 3,
+        "type": "minecraft:stone_pickaxe",
+        "name": "Stone Pickaxe",
+        "count": 1
+      },
+      {
+        "slot": 4,
+        "type": "minecraft:stone_axe",
+        "name": "Stone Axe",
+        "count": 1
+      },
+      {
+        "slot": 5,
+        "type": "minecraft:spruce_boat",
+        "name": "Spruce Boat",
+        "count": 1
+      },
+      {
+        "slot": 6,
+        "type": "minecraft:cobblestone_slab",
+        "name": "Cobblestone Slab",
+        "count": 2
+      },
+      {
+        "slot": 7,
+        "type": "minecraft:carrot",
+        "name": "Carrot",
+        "count": 36
+      },
+      {
+        "slot": 8,
+        "type": "minecraft:cobblestone",
+        "name": "Cobblestone",
+        "count": 52
+      }
+    ]
+  }
+}
+```
+
+### open_container
+Opens the container on the crosshair
+```json
+{"type": "open_container"}
+```
+Example Response (if there is a container at the crosshair):
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Interacted with block at class_2339{x=-190, y=115, z=110} (result: class_9860[swingSource=CLIENT, itemContext=class_9858[wasItemInteraction=true, heldItemTransformedTo=null]])"
+  }
+}
+```
+Example Response (if no container):
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Interacted with block at class_2339{x=-193, y=114, z=109} (result: class_9859[])"
+  }
+}
+```
+(ps. I'm sorry that it still shows success=true for this, I'll fix this in future versions)
+
+
+
 ## 🐍 Sample Python Client
 ```python
 import socket
