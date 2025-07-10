@@ -590,7 +590,27 @@ Response:
 {
   "result": {
     "success": true,
-    "result": "Player is now sleeping at class_2338{x=-172, y=102, z=19}"
+    "message": "Sent bed use interaction to server at class_2338{x=-172, y=102, z=19}"
+  }
+}
+```
+
+Response if the block isn't a bed:
+```json
+{
+  "result": {
+    "success": false,
+    "error": "Block at given position is not a bed"
+  }
+}
+```
+
+Response if it is daytime or not a thunderstorm (sleep failed):
+```json
+{
+  "result": {
+    "success": false,
+    "error": "Cannot sleep now (not night or thunderstorm)"
   }
 }
 ```
