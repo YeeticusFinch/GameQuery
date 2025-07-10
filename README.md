@@ -525,6 +525,82 @@ if __name__ == "__main__":
     response = client.send_query({"type": "position"})
     print(response)
 ```
+
+### use_door
+Opens or closes the door at the crosshair or at a defined coordinate. If `state` is defined, then it will set the door to that state (open = true, closed = false). Else it will just toggle the door to the opposite state of what it is currently at.
+Query:
+```json
+{"type":"use_door"}
+```
+Response:
+```json
+{
+  "result": {
+    "result": "closed the door at class_2338{x=-178, y=104, z=14}"
+  }
+}
+```
+Query:
+```json
+{"type":"use_door", "state":"closed"}
+```
+Response:
+```json
+{
+  "result": {
+    "result": "door already closed"
+  }
+}
+```
+Query:
+```json
+{"type":"use_door", "state":true}
+```
+Response:
+```json
+{
+  "result": {
+    "result": "opened the door at class_2338{x=-178, y=103, z=14}"
+  }
+}
+```
+Query:
+```json
+{"type":"use_door", "x":-178, "y":103, "z":14, "state":true}
+```
+Response:
+```json
+{
+  "result": {
+    "result": "opened the door at class_2338{x=-178, y=103, z=14}"
+  }
+}
+```
+
+### use_bed
+Tries to sleep in the bed at the defined position or the bed on the crosshair (if no position is defined).
+```json
+{"type": "use_bed"}
+```
+```json
+{"type": "use_bed",  "x":-172, "y":102, "z":19}
+```
+Response:
+```json
+{
+  "result": {
+    "success": true,
+    "result": "Player is now sleeping at class_2338{x=-172, y=102, z=19}"
+  }
+}
+```
+
+### leave_bed
+Leaves the bed that the player is currently sleeping in (sometimes `use_bed` will put the player in a glitched state where they can't leave the bed normally)
+```json
+{"type": "leave_bed"}
+```
+
 ## 🧪 Testing
 Once Minecraft is running with the mod:
 
