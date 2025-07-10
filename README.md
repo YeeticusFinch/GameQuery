@@ -446,9 +446,19 @@ Example Response (if no container):
 (ps. I'm sorry that it still shows success=true for this, I'll fix this in future versions)
 
 ### attack
-Attacks whatever is on the crosshair.
+Attacks whatever is on the crosshair using the currently selected item in the mainhand.
 ```json
 {"type": "attack"}
+```
+Example Response:
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Attacked entity: Sheep",
+    "uuid": "44a7eb0a-ddde-43c3-873c-594a94aa1cd1"
+  }
+}
 ```
 
 ### shoot_bow
@@ -461,12 +471,20 @@ Optional overshoot parameter, to overshoot by a certain range (ie. shoot this ma
 {"type": "shoot_bow", "x": 42, "y": 69, "z": 42, "overshoot": 5}
 ```
 ```json
-{"type": "shoot_bow", "entity": "sdf98p7-d8s7t-w87tvodad4"}
+{"type": "shoot_bow", "entity": "44a7eb0a-ddde-43c3-873c-594a94aa1cd1"}
 ```
 ```json
-{"type": "shoot_bow", "entity": "sdf98p7-d8s7t-w87tvodad4", "overshoot": 3}
+{"type": "shoot_bow", "entity": "44a7eb0a-ddde-43c3-873c-594a94aa1cd1", "overshoot": 3}
 ```
 
+Example Response:
+```json
+{
+  "result": {
+    "bow_slot": 2
+  }
+}
+```
 
 ## 🐍 Sample Python Client
 ```python
