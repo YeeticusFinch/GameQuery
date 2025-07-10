@@ -445,6 +445,27 @@ Example Response (if no container):
 ```
 (ps. I'm sorry that it still shows success=true for this, I'll fix this in future versions)
 
+### attack
+Attacks whatever is on the crosshair.
+```json
+{"type": "attack"}
+```
+
+### shoot_bow
+Selects a bow from the hotbar, and shoots it at a target coordinate or entity, accurate up to 114 blocks range for stationary targets
+Optional overshoot parameter, to overshoot by a certain range (ie. shoot this many blocks further than the target)
+```json
+{"type": "shoot_bow", "x": 42, "y": 69, "z": 42}
+```
+```json
+{"type": "shoot_bow", "x": 42, "y": 69, "z": 42, "overshoot": 5}
+```
+```json
+{"type": "shoot_bow", "entity": "sdf98p7-d8s7t-w87tvodad4"}
+```
+```json
+{"type": "shoot_bow", "entity": "sdf98p7-d8s7t-w87tvodad4", "overshoot": 3}
+```
 
 
 ## 🐍 Sample Python Client
