@@ -3,7 +3,7 @@
 	"package": "com.lerdorf.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
-		"ExampleMixin"
+		"GameQueryMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

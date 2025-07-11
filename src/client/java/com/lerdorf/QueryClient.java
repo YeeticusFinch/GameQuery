@@ -1,12 +1,14 @@
 package com.lerdorf;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.datafixers.util.Either;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
@@ -36,12 +38,17 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import net.minecraft.block.DoorBlock;
+
+import me.cortex.facebar.LocatorBarData;
 
 public class QueryClient {
 	private final MinecraftClient client;
@@ -341,6 +348,9 @@ public class QueryClient {
 						syncResponse.addProperty("result", "No GUI screen was open");
 					}
 					break;
+				case "players":
+				    syncResponse.add("players", getOnlinePlayers());
+				    break;
 				default:
 					syncResponse.addProperty("error", "Unknown query type: " + type);
 				}
@@ -355,6 +365,107 @@ public class QueryClient {
 			return response;
 		}
 	}
+	
+	public JsonObject getOnlinePlayers() {
+	    JsonObject response = new JsonObject();
+	    JsonArray playersArray = new JsonArray();
+
+	    ClientWorld world = client.world;
+	    ClientPlayerEntity localPlayer = client.player;
+
+	    if (world == null || localPlayer == null) {
+	        response.addProperty("error", "Player or world not available");
+	        return response;
+	    }
+	    
+	    Map<String, Double[]> trackerBar = null;
+        
+        if (GameQueryModClient.carlsFaceBar) {
+    		try {
+        		//java.lang.reflect.Method method = GameQueryModClient.locatorBarDataClass.getMethod("getAllWaypointsData");
+        		trackerBar = LocatorBarData.getAllWaypointsData();
+    		} catch (Exception e) {
+    			response.addProperty("error", e.getMessage());
+    		}
+    	}
+
+	    Map<UUID, PlayerEntity> visiblePlayers = new HashMap<>();
+	    for (PlayerEntity p : world.getPlayers()) {
+	        visiblePlayers.put(p.getUuid(), p);
+	    }
+
+	    for (PlayerListEntry entry : client.getNetworkHandler().getPlayerList()) {
+	        JsonObject playerData = new JsonObject();
+
+	        UUID uuid = entry.getProfile().getId();
+	        String name = entry.getProfile().getName();
+	        playerData.addProperty("uuid", uuid.toString());
+	        playerData.addProperty("name", name);
+	        
+	        if (visiblePlayers.containsKey(uuid)) {
+	            PlayerEntity entity = visiblePlayers.get(uuid);
+
+	            // Position and Stats
+	            playerData.addProperty("x", entity.getX());
+	            playerData.addProperty("y", entity.getY());
+	            playerData.addProperty("z", entity.getZ());
+	            playerData.addProperty("health", entity.getHealth());
+	            playerData.addProperty("food", entity.getHungerManager().getFoodLevel());
+	            playerData.addProperty("level", entity.experienceLevel);
+	            playerData.addProperty("inRenderDistance", true);
+
+	            // Direction calculation
+	            double dx = entity.getX() - localPlayer.getX();
+	            double dy = (entity.getY() + entity.getStandingEyeHeight()) - localPlayer.getEyeY();
+	            double dz = entity.getZ() - localPlayer.getZ();
+
+	            double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+	            double yaw = Math.toDegrees(Math.atan2(dz, dx)) - 90.0;
+	            double pitch = -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+
+	            // Normalize angles
+	            yaw = (yaw + 360.0) % 360.0;
+	            pitch = Math.max(-90.0, Math.min(90.0, pitch));
+
+	            playerData.addProperty("direction_yaw", Math.round(yaw * 100.0) / 100.0);
+	            playerData.addProperty("direction_pitch", Math.round(pitch * 100.0) / 100.0);
+	            playerData.addProperty("distance", Math.round(distance * 100.0) / 100.0);
+	        } else {
+	            // Not visible (out of render distance)
+	        	// Use locator bar if possible
+	        	
+	        	if (trackerBar != null) {
+	        		try {
+		        		if (trackerBar.containsKey(uuid.toString())) {
+		        			Double[] trackerData = trackerBar.get(uuid.toString());
+		        			double active = trackerData[0];
+		        			double yawAngle = trackerData[1];
+		        			double distance = trackerData[2];
+		        			double approx_x = trackerData[3];
+		        			double approx_z = trackerData[4];
+		        			playerData.addProperty("active", active > 0.1);
+		        			playerData.addProperty("direction_yaw", yawAngle);
+		    	            playerData.addProperty("distance", Math.round(distance * 100.0) / 100.0);
+		    	            playerData.addProperty("x", approx_x);
+		    	            playerData.addProperty("z", approx_z);
+		        		}
+	        		} catch (Exception e) {
+	        			playerData.addProperty("error", e.getMessage());
+	        		}
+	        	}
+	        	
+	            playerData.addProperty("inRenderDistance", false);
+	            //playerData.addProperty("direction", "unknown");
+	        }
+
+	        playersArray.add(playerData);
+	    }
+
+	    response.add("players", playersArray);
+	    return response;
+	}
+
+
 	
 	public JsonElement useBed(int x, int y, int z) {
 	    JsonObject result = new JsonObject();
@@ -388,7 +499,7 @@ public class QueryClient {
 	    		    net.minecraft.util.Hand.MAIN_HAND,
 	    		    new net.minecraft.util.hit.BlockHitResult(
 	    		        player.getPos(),
-	    		        net.minecraft.util.math.Direction.DOWN,
+	    		        net.minecraft.util.math.Direction.UP,
 	    		        bedPos,
 	    		        false
 	    		    )
