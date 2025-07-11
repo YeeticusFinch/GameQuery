@@ -283,6 +283,209 @@ Example Response:
   }
 }
 ```
+
+### get_block
+Gets the block and some other information about the block at a specific coordinate in the same world as the player.
+```json
+{ "type": "get_block", "x": 42, "y": 69, "z": 42 }
+```
+Example Response:
+```json
+{
+  "type": "Block{minecraft:chest}",
+  "contents": []
+}
+```
+
+### left_click
+Performs a generic left click
+```json
+{"type": "left_click"}
+```
+Example Response (if it's a block on the crosshair):
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Attacked block at class_2339{x=-190, y=115, z=110}"
+  }
+}
+```
+Example Response (if it's an entity on the crosshair):
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Attacked entity: Armor Stand"
+  }
+}
+```
+
+### right_click
+Performs a generic right click
+```json
+{"type": "right_click"}
+```
+Example Response:
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Right-clicked entity: Armor Stand (result: class_9859[])"
+  }
+}
+```
+
+### select_slot
+Selects the hotbar slot by slot number (starting from 0, so numbers from 0-8 inclusive).
+```json
+{"type": "select_slot", "slot":1}
+```
+Example Response:
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Selected hotbar slot 1"
+  }
+}
+```
+
+### hotbaar
+Returns the items in the player's hotbar.
+```json
+{"type": "hotbar"}
+```
+Example Response:
+```json
+{
+  "hotbar": {
+    "items": [
+      {
+        "slot": 0,
+        "type": "minecraft:iron_sword",
+        "name": "Iron Sword",
+        "count": 1
+      },
+      {
+        "slot": 1,
+        "type": "minecraft:water_bucket",
+        "name": "Water Bucket",
+        "count": 1
+      },
+      {
+        "slot": 2,
+        "type": "minecraft:bow",
+        "name": "Bow",
+        "count": 1
+      },
+      {
+        "slot": 3,
+        "type": "minecraft:stone_pickaxe",
+        "name": "Stone Pickaxe",
+        "count": 1
+      },
+      {
+        "slot": 4,
+        "type": "minecraft:stone_axe",
+        "name": "Stone Axe",
+        "count": 1
+      },
+      {
+        "slot": 5,
+        "type": "minecraft:spruce_boat",
+        "name": "Spruce Boat",
+        "count": 1
+      },
+      {
+        "slot": 6,
+        "type": "minecraft:cobblestone_slab",
+        "name": "Cobblestone Slab",
+        "count": 2
+      },
+      {
+        "slot": 7,
+        "type": "minecraft:carrot",
+        "name": "Carrot",
+        "count": 36
+      },
+      {
+        "slot": 8,
+        "type": "minecraft:cobblestone",
+        "name": "Cobblestone",
+        "count": 52
+      }
+    ]
+  }
+}
+```
+
+### open_container
+Opens the container on the crosshair
+```json
+{"type": "open_container"}
+```
+Example Response (if there is a container at the crosshair):
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Interacted with block at class_2339{x=-190, y=115, z=110} (result: class_9860[swingSource=CLIENT, itemContext=class_9858[wasItemInteraction=true, heldItemTransformedTo=null]])"
+  }
+}
+```
+Example Response (if no container):
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Interacted with block at class_2339{x=-193, y=114, z=109} (result: class_9859[])"
+  }
+}
+```
+(ps. I'm sorry that it still shows success=true for this, I'll fix this in future versions)
+
+### attack
+Attacks whatever is on the crosshair using the currently selected item in the mainhand.
+```json
+{"type": "attack"}
+```
+Example Response:
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Attacked entity: Sheep",
+    "uuid": "44a7eb0a-ddde-43c3-873c-594a94aa1cd1"
+  }
+}
+```
+
+### shoot_bow
+Selects a bow from the hotbar, and shoots it at a target coordinate or entity, accurate up to 114 blocks range for stationary targets
+Optional overshoot parameter, to overshoot by a certain range (ie. shoot this many blocks further than the target)
+```json
+{"type": "shoot_bow", "x": 42, "y": 69, "z": 42}
+```
+```json
+{"type": "shoot_bow", "x": 42, "y": 69, "z": 42, "overshoot": 5}
+```
+```json
+{"type": "shoot_bow", "entity": "44a7eb0a-ddde-43c3-873c-594a94aa1cd1"}
+```
+```json
+{"type": "shoot_bow", "entity": "44a7eb0a-ddde-43c3-873c-594a94aa1cd1", "overshoot": 3}
+```
+
+Example Response:
+```json
+{
+  "result": {
+    "bow_slot": 2
+  }
+}
+```
+
 ## 🐍 Sample Python Client
 ```python
 import socket
@@ -322,6 +525,102 @@ if __name__ == "__main__":
     response = client.send_query({"type": "position"})
     print(response)
 ```
+
+### use_door
+Opens or closes the door at the crosshair or at a defined coordinate. If `state` is defined, then it will set the door to that state (open = true, closed = false). Else it will just toggle the door to the opposite state of what it is currently at.
+Query:
+```json
+{"type":"use_door"}
+```
+Response:
+```json
+{
+  "result": {
+    "result": "closed the door at class_2338{x=-178, y=104, z=14}"
+  }
+}
+```
+Query:
+```json
+{"type":"use_door", "state":"closed"}
+```
+Response:
+```json
+{
+  "result": {
+    "result": "door already closed"
+  }
+}
+```
+Query:
+```json
+{"type":"use_door", "state":true}
+```
+Response:
+```json
+{
+  "result": {
+    "result": "opened the door at class_2338{x=-178, y=103, z=14}"
+  }
+}
+```
+Query:
+```json
+{"type":"use_door", "x":-178, "y":103, "z":14, "state":true}
+```
+Response:
+```json
+{
+  "result": {
+    "result": "opened the door at class_2338{x=-178, y=103, z=14}"
+  }
+}
+```
+
+### use_bed
+Tries to sleep in the bed at the defined position or the bed on the crosshair (if no position is defined).
+```json
+{"type": "use_bed"}
+```
+```json
+{"type": "use_bed",  "x":-172, "y":102, "z":19}
+```
+Response:
+```json
+{
+  "result": {
+    "success": true,
+    "message": "Sent bed use interaction to server at class_2338{x=-172, y=102, z=19}"
+  }
+}
+```
+
+Response if the block isn't a bed:
+```json
+{
+  "result": {
+    "success": false,
+    "error": "Block at given position is not a bed"
+  }
+}
+```
+
+Response if it is daytime or not a thunderstorm (sleep failed):
+```json
+{
+  "result": {
+    "success": false,
+    "error": "Cannot sleep now (not night or thunderstorm)"
+  }
+}
+```
+
+### leave_bed
+Leaves the bed that the player is currently sleeping in (sometimes `use_bed` will put the player in a glitched state where they can't leave the bed normally)
+```json
+{"type": "leave_bed"}
+```
+
 ## 🧪 Testing
 Once Minecraft is running with the mod:
 
