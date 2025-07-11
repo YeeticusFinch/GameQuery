@@ -3,16 +3,22 @@ package com.lerdorf;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.mojang.datafixers.util.Either;
+
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
+import net.minecraft.util.Unit;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.world.World;
+import net.minecraft.block.BedBlock;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.DoorBlock;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.component.ComponentMap;
 import net.minecraft.inventory.Inventory;
@@ -21,8 +27,10 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.player.PlayerEntity.SleepFailureReason;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 
 import java.io.*;
 import java.net.ServerSocket;
@@ -32,6 +40,8 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+
+import net.minecraft.block.DoorBlock;
 
 public class QueryClient {
 	private final MinecraftClient client;
@@ -262,6 +272,75 @@ public class QueryClient {
 						syncResponse.addProperty("error", "shoot_bow requires either 'x' 'y' 'z' parameters or 'entity' parameter");
 					}
 					break;
+				case "use_bed":
+				{
+					int tx = 0;
+					int ty = -69420;
+					int tz = 0;
+					if (query.has("x") && query.has("y") && query.has("z")) {
+						tx = (int)query.get("x").getAsFloat();
+		                ty = (int)query.get("y").getAsFloat();
+		                tz = (int)query.get("z").getAsFloat();
+					}
+					else if (client.crosshairTarget instanceof BlockHitResult hit) {
+						tx = hit.getBlockPos().getX();
+						ty = hit.getBlockPos().getY();
+						tz = hit.getBlockPos().getZ();
+					}
+					if (ty != -69420) {
+		                // Sleeps in the bed at the given coordinates
+		                syncResponse.add("result", useBed(tx, ty, tz));
+					} else {
+						syncResponse.addProperty("error", "use_bed requires 'x' 'y' 'z' parameters, or a block under the crosshair");
+					}
+					break;
+				}
+				case "leave_bed":
+				{
+					syncResponse.add("result", leaveBed());
+					break;
+				}
+				case "use_door":
+				{
+					int tx = 0;
+					int ty = -69420;
+					int tz = 0;
+					if (query.has("x") && query.has("y") && query.has("z")) {
+						tx = (int)query.get("x").getAsFloat();
+		                ty = (int)query.get("y").getAsFloat();
+		                tz = (int)query.get("z").getAsFloat();
+					}
+					else if (client.crosshairTarget instanceof BlockHitResult hit) {
+						tx = hit.getBlockPos().getX();
+						ty = hit.getBlockPos().getY();
+						tz = hit.getBlockPos().getZ();
+					}
+					if (ty != -69420) {
+						boolean targetState;
+						if (query.has("state")) {
+							targetState = query.get("state").getAsBoolean();
+							syncResponse.add("result", toggleDoor(tx, ty, tz, targetState, false));
+						}
+						else
+						{
+							// set the targetState to the opposite of the current door state
+							syncResponse.add("result", toggleDoor(tx, ty, tz, false, true));
+						}
+						
+					} else {
+						syncResponse.addProperty("error", "use_door requires 'x' 'y' 'z' parameters");
+					}
+					break;
+				}
+				case "exit_gui":
+					// Exits whatever gui is currently open (like a chest or a villager or an inventory...)
+					if (client.currentScreen != null) {
+						client.execute(() -> client.setScreen(null));
+						syncResponse.addProperty("result", "Closed GUI screen");
+					} else {
+						syncResponse.addProperty("result", "No GUI screen was open");
+					}
+					break;
 				default:
 					syncResponse.addProperty("error", "Unknown query type: " + type);
 				}
@@ -276,6 +355,142 @@ public class QueryClient {
 			return response;
 		}
 	}
+	
+	public JsonElement useBed(int x, int y, int z) {
+	    JsonObject result = new JsonObject();
+	    BlockPos bedPos = new BlockPos(x, y, z);
+	    ClientPlayerEntity player = client.player;
+	    ClientWorld world = client.world;
+
+	    if (player == null || world == null) {
+	        result.addProperty("success", false);
+	        result.addProperty("error", "Player or world not available");
+	        return result;
+	    }
+
+	    if (!(world.getBlockState(bedPos).getBlock() instanceof BedBlock)) {
+	        result.addProperty("success", false);
+	        result.addProperty("error", "Block at given position is not a bed");
+	        return result;
+	    }
+
+	    // Check if it's night or thunderstorm (optional, Minecraft handles this itself)
+	    if (!world.isNight() && !world.isThundering()) {
+	        result.addProperty("success", false);
+	        result.addProperty("error", "Cannot sleep now (not night or thunderstorm)");
+	        return result;
+	    }
+
+	    try {
+	        // Send interaction packet to simulate right-clicking the bed
+	    	client.interactionManager.interactBlock(
+	    		    player,
+	    		    net.minecraft.util.Hand.MAIN_HAND,
+	    		    new net.minecraft.util.hit.BlockHitResult(
+	    		        player.getPos(),
+	    		        net.minecraft.util.math.Direction.DOWN,
+	    		        bedPos,
+	    		        false
+	    		    )
+	    		);
+
+	        result.addProperty("success", true);
+	        result.addProperty("message", "Sent bed use interaction to server at " + bedPos);
+	    } catch (Exception e) {
+	        result.addProperty("success", false);
+	        result.addProperty("error", "Failed to send use_bed interaction: " + e.getMessage());
+	    }
+
+	    return result;
+	}
+
+
+	public JsonElement leaveBed() {
+	    JsonObject result = new JsonObject();
+	    ClientPlayerEntity player = client.player;
+
+	    if (player != null) {
+	        if (player.isSleeping()) {
+	            player.wakeUp(false, true); // wakeUp(immediately, updateSleepingPlayers)
+	            result.addProperty("success", true);
+	            result.addProperty("message", "Player left the bed.");
+	        } else {
+	            result.addProperty("success", false);
+	            result.addProperty("error", "Player is not currently sleeping.");
+	        }
+	    } else {
+	        result.addProperty("success", false);
+	        result.addProperty("error", "Player not available");
+	    }
+
+	    return result;
+	}
+	
+	public JsonElement toggleDoor(int x, int y, int z, boolean target_state, boolean ignore_target_state) {
+	    JsonObject result = new JsonObject();
+	    BlockPos doorPos = new BlockPos(x, y, z);
+	    ClientPlayerEntity player = client.player;
+	    ClientWorld world = client.world;
+
+	    if (player == null || world == null) {
+	        result.addProperty("error", "Player or world not available");
+	        return result;
+	    }
+
+	    BlockState state = world.getBlockState(doorPos);
+
+	    // Ensure it's the bottom half of the door
+	    if (!(state.getBlock() instanceof DoorBlock)) {
+	        result.addProperty("error", "Block at position is not a door");
+	        return result;
+	    }
+
+	    if (state.get(DoorBlock.HALF) != net.minecraft.block.enums.DoubleBlockHalf.LOWER) {
+	        // Adjust to bottom half
+	        doorPos = doorPos.down();
+	        state = world.getBlockState(doorPos);
+	        if (!(state.getBlock() instanceof DoorBlock)) {
+	            result.addProperty("error", "Adjusted block is not a door");
+	            return result;
+	        }
+	    }
+
+	    boolean currentState = state.get(DoorBlock.OPEN);
+	    boolean desiredState = !currentState;
+
+	    if (!ignore_target_state) {
+	        desiredState = target_state;
+	    }
+
+	    if (currentState == desiredState && !ignore_target_state) {
+	        result.addProperty("result", "Door already " + (currentState ? "open" : "closed"));
+	        return result;
+	    }
+
+	    try {
+	        // Properly simulate block interaction at door center
+	        client.interactionManager.interactBlock(
+	            player,
+	            Hand.MAIN_HAND,
+	            new BlockHitResult(
+	                Vec3d.ofCenter(doorPos),  // Precise hit on block center
+	                Direction.UP,             // General face
+	                doorPos,
+	                false
+	            )
+	        );
+
+	        result.addProperty("success", true);
+	        result.addProperty("result", (desiredState ? "Opened" : "Closed") + " the door at " + doorPos.toShortString());
+	    } catch (Exception e) {
+	        result.addProperty("success", false);
+	        result.addProperty("error", "Exception while toggling door: " + e.getMessage());
+	    }
+
+	    return result;
+	}
+
+
 	
 	double getBowPitch(double range) {
 		if (range <= 24)
