@@ -486,6 +486,145 @@ Example Response:
 }
 ```
 
+### use_bed
+Tries to sleep in the bed that the client is facing, or a bed at a provided coordinate.
+Using bed on crosshair:
+```json
+{"type": "use_bed"}
+```
+Using bed at a coordinate:
+```json
+{"type": "use_bed", "x": 42, "y": 69, "z": 42}
+```
+Example Response (if client can't sleep because it isn't night time or thunderstorm):
+```json
+{
+  "result":
+  {
+    "success": false,
+    "error": "Cannot sleep now (not night or thunderstorm)"
+  }
+}
+```
+
+Example Response (success):
+```json
+{
+  "result":
+  {
+    "success": true,
+    "message": "Sent bed use interaction to server at class_2338{x=42, y=69, z=42}"
+  }
+}
+```
+
+Important Note: Success state doesn't guarantee that the client actually went to sleep, it just meant that the bed interaction packet was sent.
+
+For example, if there are monsters nearby, or if the player is too far away from the bed, then the server will deny the bed interaction packet, but you will still see the success state.
+
+### leave_bed
+Leaves the bed that the client is currently sleeping in
+```json
+{"type": "leave_bed"}
+```
+
+### use_door
+Opens or closes the door on the crosshair or on the providede coordinates.
+
+This one will interact with the door on the crosshair (if it is open, it sets it closes the door, if the door is closed, it opens the door):
+```json
+{"type": "use_door"}
+```
+
+This one opens the door on the crosshair (it will only interact with the door if it is currently closed, in which case it will open it):
+```json
+{"type": "use_door", "state": true}
+```
+
+This one closes the door at coordinates 42 69 42
+```json
+{"type": "use_door", "state": false, "x": 42, "y": 69, "z": 42}
+```
+
+### exit_gui
+Exits whatever gui is currently active (container gui like a chest, inventory, villager interaction...)
+```json
+{"type": "exit_gui"}
+```
+
+### players
+Gets a list of all online players
+```json
+{"type": "players"}
+```
+Example Response:
+```json
+{
+  "success": true,
+  "players": [
+    {
+      "uuid": "f84c6a79-31e7-49cf-a5d9-b0c4c7b531df",
+      "name": "Steve",
+      "x": 123.4,
+      "y": 65.0,
+      "z": -45.2,
+      "dimension": "minecraft:overworld",
+      "health": 20.0,
+      "maxHealth": 20.0,
+      "food": 18,
+      "saturation": 5.0,
+      "level": 3
+    }
+  ]
+}
+```
+
+The elements in the players array can look very different depending on circumstances.
+
+When a player is outside of render distance, but still in the same dimension, it will try to extract information from the player tracker, if those are enabled on the server. Specifically, it will try connecting to the CarlsFaceBar Fabric mod (see it in GitHub releases).
+
+Example Response for a player that is outside of render distance, but still in the same dimension:
+```json
+      {
+        "uuid": "e048e80f-aced-4884-82f8-ae2addffdce9",
+        "name": "carl_alex",
+        "active": true,
+        "direction_yaw": 44.493186950683594,
+        "distance": 9.223372036854776e+16,
+        "x": Infinity,
+        "z": Infinity,
+        "inRenderDistance": false
+      }
+```
+
+When a player is in a different dimension, it will use the last waypoint data
+
+Example Response for a player in a different dimension:
+```json
+      {
+        "uuid": "e048e80f-aced-4884-82f8-ae2addffdce9",
+        "name": "carl_alex",
+        "active": false,
+        "direction_yaw": 44.493186950683594,
+        "distance": 9.223372036854776e+16,
+        "x": Infinity,
+        "z": Infinity,
+        "inRenderDistance": false
+      }
+```
+
+However, if a player has logged in on a different dimension or world than the client, and they have never been in the same world as the client, then there will be no waypoint data.
+
+Example Response for a player in a different dimension that hasn't ever been on the same dimension as the client:
+```json
+      {
+        "uuid": "e048e80f-aced-4884-82f8-ae2addffdce9",
+        "name": "carl_alex",
+        "inRenderDistance": false
+      }
+```
+
+
 ## 🐍 Sample Python Client
 ```python
 import socket
