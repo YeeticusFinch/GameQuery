@@ -1059,7 +1059,6 @@ public class QueryClient {
 	    	        SlotActionType.SWAP,
 	    	        client.player
 	    	    );
-	    	return true;
 	    } else if (slot2 < 9) {
 	    	client.interactionManager.clickSlot(
 	    	        client.player.currentScreenHandler.syncId,
@@ -1068,39 +1067,43 @@ public class QueryClient {
 	    	        SlotActionType.SWAP,
 	    	        client.player
 	    	    );
-	    	return true;
+	    } else {
+	
+		    // Click slot1 to pick up the item
+		    client.interactionManager.clickSlot(
+		        handler.syncId,
+		        slot1,
+		        0, // button 0 (left click)
+		        SlotActionType.PICKUP,
+		        client.player
+		    );
+	
+		    // Click slot2 to swap
+		    client.interactionManager.clickSlot(
+		        handler.syncId,
+		        slot2,
+		        0,
+		        SlotActionType.PICKUP,
+		        client.player
+		    );
+	
+		    // Put the originally picked item back into slot1
+		    client.interactionManager.clickSlot(
+		        handler.syncId,
+		        slot1,
+		        0,
+		        SlotActionType.PICKUP,
+		        client.player
+		    );
 	    }
-
-	    // Click slot1 to pick up the item
-	    client.interactionManager.clickSlot(
-	        handler.syncId,
-	        slot1,
-	        0, // button 0 (left click)
-	        SlotActionType.PICKUP,
-	        client.player
-	    );
-
-	    // Click slot2 to swap
-	    client.interactionManager.clickSlot(
-	        handler.syncId,
-	        slot2,
-	        0,
-	        SlotActionType.PICKUP,
-	        client.player
-	    );
-
-	    // Put the originally picked item back into slot1
-	    client.interactionManager.clickSlot(
-	        handler.syncId,
-	        slot1,
-	        0,
-	        SlotActionType.PICKUP,
-	        client.player
-	    );
 	    
+	    /*
 	    delayedTask(() -> {
 	    	client.execute(() -> client.setScreen(null));
-	    }, 2); // run 2 ticks later
+	    }, 1); // run 1 tick1 later
+	    */
+
+    	client.execute(() -> client.setScreen(null));
 
 	    return true;
 	}
@@ -1265,6 +1268,11 @@ public class QueryClient {
 	public boolean attack(Entity target, boolean isCrit) {
         if (client.player == null || client.world == null || target == null) return false;
 
+        // Face target
+        lookAtEntity(client.player, target);
+        
+        if (target.getPos().distanceTo(client.player.getPos()) < 2.5) isCrit = false; // Don't crit if too close
+        
         if (!swapped) {
 	        int axeSlot = getHighestPowerSlot("_axe");
 	        int swordSlot = getHighestPowerSlot("sword");
@@ -1275,7 +1283,7 @@ public class QueryClient {
 	        if (swordSlot == -1)
 	        	swordSlot = getHighestPowerSlot("hoe");
 	        
-	        boolean useAxe = isCrit && Math.random() > 0.6;
+	        boolean useAxe = isCrit && Math.random() > 0.5;
 	        
 	        if (target instanceof PlayerEntity p && isBlockingWithShield(p))
 	        	useAxe = true;
@@ -1299,9 +1307,6 @@ public class QueryClient {
         
         if (!canAttack(target)) return false;
 
-        // Face target
-        lookAtEntity(client.player, target);
-        
         if (isCrit) {
         	if (client.player.isOnGround()) {
 	            client.player.jump();  // trigger jump
