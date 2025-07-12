@@ -87,27 +87,15 @@ public class GameQueryModClient implements ClientModInitializer {
         	if (FabricLoader.getInstance().isModLoaded("carlsfacebar")) {
 			    // safe to call LocatorBarData methods using reflection or direct calls if you have access
         		carlsFaceBar = true;
-        		/*
-				try {
-					locatorBarDataClass = Class.forName("me.cortex.facebar.mixin.LocatorBarData");
-					carlsFaceBar = true;
-					LOGGER.info("[CarlsFaceBar integration] Found LocatorBarDataClass");
-				} catch (Exception e) {
-					LOGGER.info("[CarlsFaceBar integration] LocatorBarData class not found!");
-					try {
-						locatorBarDataClass = Class.forName("me.cortex.facebar.LocatorBarData");
-						carlsFaceBar = true;
-						LOGGER.info("[CarlsFaceBar integration] Found LocatorBarDataClass");
-					} catch (Exception f) {
-						LOGGER.info("[CarlsFaceBar integration] LocatorBarData class still not found!");
-					}
-				}
-				*/
+        		
 			} else {
 				LOGGER.info("[CarlsFaceBar integration] carlsfacebar not found");
 			}
         	
             queryClient = new QueryClient(client, 25566); // Port 25566
+            ClientTickEvents.END_CLIENT_TICK.register(tickclient -> {
+                queryClient.tick();
+            });
             queryClient.start();
             showToast("GameQuery", "Client mod initialized!");
             LOGGER.info("Client query server started on port 25566");

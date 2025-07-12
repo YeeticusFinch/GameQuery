@@ -1,5 +1,6 @@
 package com.lerdorf;
 
+import com.google.common.collect.Multimap;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -11,12 +12,16 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.Arm;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Unit;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.EntityHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.minecraft.world.BlockStateRaycastContext;
+import net.minecraft.world.RaycastContext;
 import net.minecraft.world.World;
 import net.minecraft.block.BedBlock;
 import net.minecraft.block.BlockState;
@@ -24,13 +29,21 @@ import net.minecraft.block.DoorBlock;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.component.ComponentMap;
 import net.minecraft.inventory.Inventory;
+import net.minecraft.item.AxeItem;
 import net.minecraft.item.BowItem;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.ShieldItem;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.attribute.EntityAttributeModifier;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerEntity.SleepFailureReason;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
@@ -49,6 +62,10 @@ import java.util.concurrent.TimeUnit;
 import net.minecraft.block.DoorBlock;
 
 import me.cortex.facebar.LocatorBarData;
+
+import net.minecraft.entity.attribute.EntityAttributeModifier;
+import net.minecraft.entity.attribute.EntityAttributes;
+import net.minecraft.entity.attribute.EntityAttribute;
 
 public class QueryClient {
 	private final MinecraftClient client;
@@ -172,10 +189,133 @@ public class QueryClient {
 					float pitch = query.has("pitch") ? query.get("pitch").getAsFloat() : client.player.getPitch();
 					syncResponse.add("result", rotatePlayer(yaw, pitch));
 					break;
+				case "get_entity_position":
+				{
+					String entityUuid = query.has("uuid") ? query.get("uuid").getAsString() : "";
+					 Entity entity = null;
+					 try {
+						 entity = getEntity(entityUuid);
+					 } catch (Exception e) {
+						 syncResponse.addProperty("error", e.getMessage());
+					 }
+					 if (entity != null) {
+						 syncResponse.addProperty("result", "success");
+						 syncResponse.addProperty("uuid", entity.getUuidAsString());
+						 syncResponse.addProperty("name", entity.getName().getString());
+						 syncResponse.addProperty("type", entity.getType().getName().getString());
+						 syncResponse.addProperty("x", entity.getX());
+						 syncResponse.addProperty("y", entity.getY());
+						 syncResponse.addProperty("z", entity.getZ());
+						 syncResponse.addProperty("yaw", entity.getYaw());
+						 syncResponse.addProperty("pitch", entity.getPitch());
+					 } else {
+						 syncResponse.addProperty("result", "failure");
+					 }
+                    break;
+				}
+				case "get_entity_velocity":
+				{
+					String entityUuid = query.has("uuid") ? query.get("uuid").getAsString() : "";
+					 Entity entity = null;
+					 try {
+						 entity = getEntity(entityUuid);
+					 } catch (Exception e) {
+						 syncResponse.addProperty("error", e.getMessage());
+					 }
+					 if (entity != null) {
+						 syncResponse.addProperty("result", "success");
+						 syncResponse.addProperty("uuid", entity.getUuidAsString());
+						 syncResponse.addProperty("name", entity.getName().getString());
+						 syncResponse.addProperty("type", entity.getType().getName().getString());
+						 syncResponse.addProperty("vx", entity.getVelocity().getX());
+						 syncResponse.addProperty("vy", entity.getVelocity().getY());
+						 syncResponse.addProperty("vz", entity.getVelocity().getZ());
+					 } else {
+						 syncResponse.addProperty("result", "failure");
+					 }
+                    break;
+				}
+				case "get_entity":
+				{
+					 String entityUuid = query.has("uuid") ? query.get("uuid").getAsString() : "";
+					 Entity entity = null;
+					 try {
+						 entity = getEntity(entityUuid);
+					 } catch (Exception e) {
+						 syncResponse.addProperty("error", e.getMessage());
+					 }
+					 if (entity != null) {
+						 syncResponse.addProperty("result", "success");
+						 syncResponse.addProperty("uuid", entity.getUuidAsString());
+						 syncResponse.addProperty("name", entity.getName().getString());
+						 syncResponse.addProperty("type", entity.getType().getName().getString());
+						 syncResponse.addProperty("display_name", entity.getDisplayName().getString());
+						 syncResponse.addProperty("custom_name", entity.getCustomName().getString());
+						 syncResponse.addProperty("x", entity.getX());
+						 syncResponse.addProperty("y", entity.getY());
+						 syncResponse.addProperty("z", entity.getZ());
+						 syncResponse.addProperty("vx", entity.getVelocity().getX());
+						 syncResponse.addProperty("vy", entity.getVelocity().getY());
+						 syncResponse.addProperty("vz", entity.getVelocity().getZ());
+						 syncResponse.addProperty("yaw", entity.getYaw());
+						 syncResponse.addProperty("pitch", entity.getPitch());
+						 syncResponse.addProperty("age", entity.age);
+						 syncResponse.addProperty("in_powder_snow", entity.inPowderSnow);
+						 syncResponse.addProperty("on_ground", entity.isOnGround());
+						 syncResponse.addProperty("submerged_in_water", entity.isSubmergedInWater());
+						 syncResponse.addProperty("touching_water", entity.isTouchingWater());
+						 syncResponse.addProperty("touching_water_or_rain", entity.isTouchingWaterOrRain());
+						 syncResponse.addProperty("on_fire", entity.isOnFire());
+						 syncResponse.addProperty("fire_ticks", entity.getFireTicks());
+						 syncResponse.addProperty("alive", entity.isAlive());
+						 
+						 if (entity instanceof LivingEntity le) {
+							 syncResponse.addProperty("living_entity", true);
+							 syncResponse.addProperty("fall_distance", le.fallDistance);
+							 syncResponse.addProperty("health", le.getHealth());
+							 syncResponse.addProperty("max_health", le.getMaxHealth());
+							 syncResponse.addProperty("left_hand", le.getStackInArm(Arm.LEFT) != null ? le.getStackInArm(Arm.LEFT).getItem().toString() : null);
+							 syncResponse.addProperty("right_hand", le.getStackInArm(Arm.RIGHT) != null ? le.getStackInArm(Arm.RIGHT).getItem().toString() : null);
+							 syncResponse.addProperty("helmet", le.getEquippedStack(EquipmentSlot.HEAD) != null ? le.getEquippedStack(EquipmentSlot.HEAD).getItem().toString() : null);
+							 syncResponse.addProperty("chest", le.getEquippedStack(EquipmentSlot.CHEST) != null ? le.getEquippedStack(EquipmentSlot.CHEST).getItem().toString() : null);
+							 syncResponse.addProperty("legs", le.getEquippedStack(EquipmentSlot.LEGS) != null ? le.getEquippedStack(EquipmentSlot.LEGS).getItem().toString() : null);
+							 syncResponse.addProperty("feet", le.getEquippedStack(EquipmentSlot.FEET) != null ? le.getEquippedStack(EquipmentSlot.FEET).getItem().toString() : null);
+							 syncResponse.addProperty("armor", le.getArmor());
+							 syncResponse.addProperty("has_vehicle", le.hasVehicle());
+							 if (le.hasVehicle())
+								 syncResponse.addProperty("vehicle", le.getVehicle().getUuidAsString());
+							 syncResponse.addProperty("has_passenger", le.hasPassengers());
+							 if (le.hasPassengers())
+								 syncResponse.addProperty("passengers", le.getPassengerList().toString());
+							 
+							 if (le instanceof MobEntity) {
+									boolean hostile = entity instanceof net.minecraft.entity.mob.HostileEntity;
+									boolean passive = entity instanceof net.minecraft.entity.passive.PassiveEntity;
+									boolean neutral = entity instanceof net.minecraft.entity.mob.Angerable;
+									syncResponse.addProperty("hostile", hostile);
+									syncResponse.addProperty("passive", passive);
+									syncResponse.addProperty("neutral", neutral);
+							}
+
+							if (le instanceof PlayerEntity p) {
+								syncResponse.addProperty("player", true);
+							} else {
+								syncResponse.addProperty("player", false);
+							}
+						 } else {
+							 syncResponse.addProperty("living_entity", false);
+						 }
+					 } else {
+						 syncResponse.addProperty("result", "failure");
+					 }
+                     break;
+				}
 				case "point_to_entity":
+				{
                      String entityUuid = query.has("uuid") ? query.get("uuid").getAsString() : "";
                      syncResponse.add("result", pointToEntity(entityUuid));
                      break;
+				}
 				case "point_to_xyz":
                     float x = query.get("x").getAsFloat();
 	                float y = query.get("y").getAsFloat();
@@ -351,6 +491,69 @@ public class QueryClient {
 				case "players":
 				    syncResponse.add("players", getOnlinePlayers());
 				    break;
+				case "kill_aura":
+				{
+					if (query.has("target")) {
+						String id = query.get("target").getAsString();
+						Entity target = client.world.getEntity(UUID.fromString(id));
+						if (target != null && target.isAlive()) {
+							killauraTargets.add(target.getUuid());
+							syncResponse.addProperty("target_result", "success");
+						} else {
+							syncResponse.addProperty("target_result", "failure");
+						}
+					}
+					if (query.has("enable")) {
+						killauraEnabled = query.get("enable").getAsBoolean();
+						syncResponse.addProperty("enabled", killauraEnabled);
+					}
+					if (query.has("remove")) {
+						String id = query.get("target").getAsString();
+						UUID uuid = UUID.fromString(id);
+						if (uuid != null) {
+							if (killauraTargets.contains(uuid)) {
+								killauraTargets.remove(uuid);
+								syncResponse.addProperty("remove_result", "success");
+							} else {
+								syncResponse.addProperty("remove_result", "failure - uuid not in killaura targets");
+							}
+						} else {
+							syncResponse.addProperty("remove_result", "failure - unknown entity");
+						}
+					}
+					if (query.has("clear") && query.get("clear").getAsBoolean()) {
+						killauraTargets.clear();
+					}
+					syncResponse.addProperty("enabled", killauraEnabled);
+					break;
+				}
+				case "kill_aura_targets":
+				{
+					syncResponse.addProperty("enabled", killauraEnabled);
+					JsonObject targets = new JsonObject();
+					if (killauraTargets.size() > 0) {
+						for (UUID uuid : killauraTargets) {
+							targets.addProperty("uuid", uuid.toString());
+						}
+					}
+					syncResponse.add("result", targets);
+					break;
+				}
+				case "swap":
+				{
+					try {
+						if (query.has("slot1") && query.has("slot2")) {
+							int slot1 = query.get("slot1").getAsInt();
+							int slot2 = query.get("slot2").getAsInt();
+							boolean success = swapSlots(slot1, slot2);
+							syncResponse.addProperty("success", success);
+						} else {
+							syncResponse.addProperty("error", "must include `slot1` and `slot2` integer parameters");
+						}
+					} catch (Exception e) {
+						syncResponse.addProperty("error", e.getMessage());
+					}
+				}
 				default:
 					syncResponse.addProperty("error", "Unknown query type: " + type);
 				}
@@ -833,6 +1036,81 @@ public class QueryClient {
 	    return result;
 	}
 	
+	private boolean swapSlots(int slot1, int slot2) {
+	    if (client.player == null || client.interactionManager == null) return false;
+
+	    ScreenHandler handler = client.player.currentScreenHandler;
+
+	    // Validate slot indices
+	    if (slot1 < 0 || slot2 < 0 || slot1 >= handler.slots.size() || slot2 >= handler.slots.size()) {
+	        return false;
+	    }
+
+	    // Click slot1 to pick up the item
+	    client.interactionManager.clickSlot(
+	        handler.syncId,
+	        slot1,
+	        0, // button 0 (left click)
+	        SlotActionType.PICKUP,
+	        client.player
+	    );
+
+	    // Click slot2 to swap
+	    client.interactionManager.clickSlot(
+	        handler.syncId,
+	        slot2,
+	        0,
+	        SlotActionType.PICKUP,
+	        client.player
+	    );
+
+	    // Put the originally picked item back into slot1
+	    client.interactionManager.clickSlot(
+	        handler.syncId,
+	        slot1,
+	        0,
+	        SlotActionType.PICKUP,
+	        client.player
+	    );
+
+	    return true;
+	}
+
+	
+	private int getHighestPowerSlot(String type) {
+		float power = 0;
+		int slot = -1;
+		//ItemStack targetStack = null;
+		type = type.toLowerCase();
+		for (int i = 0; i < client.player.getInventory().size(); i++) {
+			ItemStack stack = client.player.getInventory().getStack(i);
+			if (!stack.isEmpty() && stack.getItem().toString().toLowerCase().contains(type)) {
+				float currentPower = 0;
+				String item = stack.getItem().toString().toLowerCase();
+				if (item.contains("wood")) {
+					currentPower = 1;
+				} else if (item.contains("stone")) {
+					currentPower = 2;
+				} else if (item.contains("gold") || item.contains("chainmail")) {
+					currentPower = 3;
+				} else if (item.contains("iron")) {
+					currentPower = 4;
+				} else if (item.contains("diamond")) {
+					currentPower = 5;
+				}
+				if (stack.hasEnchantments()) {
+					currentPower += 0.2 * stack.getEnchantments().getSize();
+				}
+				if (currentPower > power) {
+					slot = i;
+					power = currentPower;
+					//targetStack = stack;
+				}
+			}
+		}
+		return slot;
+	}
+	
 	private JsonElement openContainerUnderCrosshair() {
 		JsonObject result = new JsonObject();
 		try {
@@ -853,6 +1131,143 @@ public class QueryClient {
 		}
 		return result;
 	}
+	
+	private boolean performAttack(Entity target) {
+        if (target == null || client.player == null || client.interactionManager == null) return false;
+
+        client.interactionManager.attackEntity(client.player, target);
+        client.player.swingHand(Hand.MAIN_HAND);
+        return true;
+    }
+	
+	public boolean killauraEnabled = false;
+    public List<UUID> killauraTargets = new ArrayList<>();
+	
+    boolean useCrits = true;
+    
+    int c = 0;
+    int hitCountDown = 0;
+    
+	public void tick() {
+        if (!killauraEnabled || client.player == null || client.world == null) return;
+        c++;
+        if (c > 2) {
+        	c = 0;
+        	if (hitCountDown > 0) {
+        		hitCountDown--;
+        	} else {
+        		useCrits = true;
+        	}
+	        boolean hit = false;
+	        ArrayList<UUID> remove = new ArrayList<>();
+	        for (UUID uuid : killauraTargets) {
+	            Entity target = client.world.getEntity(uuid);
+	            if (target != null && target.isAlive()) {
+	            	//if (canAttack(target)) {
+		                //lookAtEntity(client.player, target);
+		            hit = attack(target, useCrits);
+		            if (hit) {
+		            	hitCountDown = 5;
+		            	useCrits = false;
+		            }
+	            	//}
+	            } else {
+	            	remove.add(uuid);
+	            }
+	        }
+	        for (UUID uuid : remove) {
+	        	killauraTargets.remove(uuid);
+	        }
+        }
+    }
+	
+    private boolean canAttack(Entity target) {
+        if (target == null || !target.isAlive() || target == client.player) return false;
+        if (client.player.getAttackCooldownProgress(0.0f) < 1.0f) return false;
+
+        // Basic range check (3 blocks)
+        double distanceSq = client.player.squaredDistanceTo(target);
+        if (distanceSq > 9) return false;
+
+        // Line of sight check
+        Vec3d eyePos = client.player.getCameraPosVec(1.0F);
+        Vec3d targetPos = target.getPos().add(0, target.getHeight() / 2.0, 0);
+        HitResult hit = client.world.raycast(new RaycastContext(
+            eyePos, targetPos,
+            RaycastContext.ShapeType.COLLIDER,
+            RaycastContext.FluidHandling.NONE,
+            client.player
+        ));
+
+        return hit.getType() == HitResult.Type.MISS || hit instanceof EntityHitResult;
+    }
+    
+    public boolean isBlockingWithShield(PlayerEntity player) {
+        if (player == null) return false;
+
+        return player.isUsingItem()
+            && player.getActiveItem().getItem() instanceof ShieldItem;
+    }
+	
+	public boolean attack(Entity target, boolean isCrit) {
+        if (client.player == null || client.world == null || target == null) return false;
+
+        int axeSlot = getHighestPowerSlot("_axe");
+        int swordSlot = getHighestPowerSlot("sword");
+        if (swordSlot == -1)
+        	swordSlot = getHighestPowerSlot("pickaxe");
+        if (swordSlot == -1)
+        	swordSlot = getHighestPowerSlot("shovel");
+        if (swordSlot == -1)
+        	swordSlot = getHighestPowerSlot("hoe");
+        
+        boolean useAxe = isCrit && Math.random() > 0.6;
+        
+        if (target instanceof PlayerEntity p && isBlockingWithShield(p))
+        	useAxe = true;
+        
+        if (axeSlot == -1)
+        	useAxe = false;
+        
+        int targetSlot = useAxe ? axeSlot : swordSlot;
+        if (targetSlot == -1)
+        	targetSlot = 0;
+        
+        if (targetSlot <= 8)
+        	client.player.getInventory().setSelectedSlot(targetSlot);
+        else {
+        	swapSlots(targetSlot, 0);
+        	client.player.getInventory().setSelectedSlot(0);
+        }
+        
+        if (!canAttack(target)) return false;
+
+        // Face target
+        lookAtEntity(client.player, target);
+        
+        if (isCrit) {
+        	if (client.player.isOnGround()) {
+	            client.player.jump();  // trigger jump
+	
+        	} else if (client.player.getVelocity().y < 0) { // Wait until falling (this example assumes this is in a tick loop or similar)
+                return performAttack(target);
+            }
+        } else {
+            return performAttack(target);
+        }
+        return false;
+    }
+	
+	private void lookAtEntity(ClientPlayerEntity player, Entity target) {
+        Vec3d delta = target.getPos().add(0, target.getHeight() / 2.0, 0).subtract(player.getEyePos());
+        double distXZ = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+
+        float yaw = (float)(Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90.0F);
+        float pitch = (float)(-Math.toDegrees(Math.atan2(delta.y, distXZ)));
+
+        player.setYaw(yaw);
+        player.setPitch(pitch);
+    }
 	
 	private JsonElement attackEntityUnderCrosshair() {
 		JsonObject result = new JsonObject();
@@ -1029,6 +1444,36 @@ public class QueryClient {
         }
         
         return result;
+	}
+	
+	private Entity getEntity(String entityUuid) {
+		if (entityUuid == null || entityUuid.trim().isEmpty()) {
+            return null;
+        }
+        
+        try {
+            ClientPlayerEntity player = client.player;
+            ClientWorld world = client.world;
+            
+            if (player != null && world != null) {
+                //UUID targetUuid = UUID.fromString(entityUuid);
+                
+                // Search for the entity in a large area around the player
+                Box searchBox = new Box(player.getBlockPos()).expand(200);
+                List<Entity> entities = world.getEntitiesByClass(Entity.class, searchBox, 
+                    entity -> entity.getUuidAsString().equals(entityUuid));
+                
+                if (!entities.isEmpty()) {
+                    Entity targetEntity = entities.get(0);
+                    
+                    return targetEntity;
+                }
+            } 
+        } catch (IllegalArgumentException e) {
+        } catch (Exception e) {
+        }
+        
+        return null;
 	}
 	
 	private LivingEntity getLivingEntity(String entityUuid) {
