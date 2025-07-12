@@ -23,7 +23,6 @@ private QueryServer queryServer;
 			// Start the query server when the server starts
 			ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
 			ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
-			
 			LOGGER.info("GameQuery mod initialized!");
 		}
 		

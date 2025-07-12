@@ -8,6 +8,7 @@ import com.google.gson.JsonObject;
 import com.mojang.datafixers.util.Either;
 
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.world.ClientWorld;
@@ -23,6 +24,7 @@ import net.minecraft.util.math.Box;
 import net.minecraft.world.BlockStateRaycastContext;
 import net.minecraft.world.RaycastContext;
 import net.minecraft.world.World;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.block.BedBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.DoorBlock;
@@ -553,6 +555,7 @@ public class QueryClient {
 					} catch (Exception e) {
 						syncResponse.addProperty("error", e.getMessage());
 					}
+					break;
 				}
 				default:
 					syncResponse.addProperty("error", "Unknown query type: " + type);
@@ -1045,6 +1048,28 @@ public class QueryClient {
 	    if (slot1 < 0 || slot2 < 0 || slot1 >= handler.slots.size() || slot2 >= handler.slots.size()) {
 	        return false;
 	    }
+	    
+	    client.setScreen(new InventoryScreen(client.player));
+	    
+	    if (slot1 < 9) {
+	    	client.interactionManager.clickSlot(
+	    	        client.player.currentScreenHandler.syncId,
+	    	        slot2,
+	    	        slot1,
+	    	        SlotActionType.SWAP,
+	    	        client.player
+	    	    );
+	    	return true;
+	    } else if (slot2 < 9) {
+	    	client.interactionManager.clickSlot(
+	    	        client.player.currentScreenHandler.syncId,
+	    	        slot1,
+	    	        slot2,
+	    	        SlotActionType.SWAP,
+	    	        client.player
+	    	    );
+	    	return true;
+	    }
 
 	    // Click slot1 to pick up the item
 	    client.interactionManager.clickSlot(
@@ -1072,8 +1097,20 @@ public class QueryClient {
 	        SlotActionType.PICKUP,
 	        client.player
 	    );
+	    
+	    delayedTask(() -> {
+	    	client.execute(() -> client.setScreen(null));
+	    }, 2); // run 2 ticks later
 
 	    return true;
+	}
+	
+	Map<Runnable, Integer> delayedTasks = new HashMap<>();
+	
+	private void delayedTask(Runnable task, int delay) {
+		
+		delayedTasks.put(task, delay);
+
 	}
 
 	
@@ -1149,6 +1186,20 @@ public class QueryClient {
     int hitCountDown = 0;
     
 	public void tick() {
+		if (delayedTasks.size() > 0) {
+			ArrayList<Runnable> remove = new ArrayList<>();
+			for (Runnable task : delayedTasks.keySet()) {
+				if (delayedTasks.get(task) == 0) {
+					task.run();
+					remove.add(task);
+				} else {
+					delayedTasks.put(task, delayedTasks.get(task)-1);
+				}
+			}
+			for (Runnable task : remove) {
+				delayedTasks.remove(task);
+			}
+		}
         if (!killauraEnabled || client.player == null || client.world == null) return;
         c++;
         if (c > 2) {
@@ -1209,35 +1260,41 @@ public class QueryClient {
             && player.getActiveItem().getItem() instanceof ShieldItem;
     }
 	
+    boolean swapped = false;
+    
 	public boolean attack(Entity target, boolean isCrit) {
         if (client.player == null || client.world == null || target == null) return false;
 
-        int axeSlot = getHighestPowerSlot("_axe");
-        int swordSlot = getHighestPowerSlot("sword");
-        if (swordSlot == -1)
-        	swordSlot = getHighestPowerSlot("pickaxe");
-        if (swordSlot == -1)
-        	swordSlot = getHighestPowerSlot("shovel");
-        if (swordSlot == -1)
-        	swordSlot = getHighestPowerSlot("hoe");
-        
-        boolean useAxe = isCrit && Math.random() > 0.6;
-        
-        if (target instanceof PlayerEntity p && isBlockingWithShield(p))
-        	useAxe = true;
-        
-        if (axeSlot == -1)
-        	useAxe = false;
-        
-        int targetSlot = useAxe ? axeSlot : swordSlot;
-        if (targetSlot == -1)
-        	targetSlot = 0;
-        
-        if (targetSlot <= 8)
-        	client.player.getInventory().setSelectedSlot(targetSlot);
-        else {
-        	swapSlots(targetSlot, 0);
-        	client.player.getInventory().setSelectedSlot(0);
+        if (!swapped) {
+	        int axeSlot = getHighestPowerSlot("_axe");
+	        int swordSlot = getHighestPowerSlot("sword");
+	        if (swordSlot == -1)
+	        	swordSlot = getHighestPowerSlot("pickaxe");
+	        if (swordSlot == -1)
+	        	swordSlot = getHighestPowerSlot("shovel");
+	        if (swordSlot == -1)
+	        	swordSlot = getHighestPowerSlot("hoe");
+	        
+	        boolean useAxe = isCrit && Math.random() > 0.6;
+	        
+	        if (target instanceof PlayerEntity p && isBlockingWithShield(p))
+	        	useAxe = true;
+	        
+	        if (axeSlot == -1)
+	        	useAxe = false;
+	        
+	        int targetSlot = useAxe ? axeSlot : swordSlot;
+	        if (targetSlot == -1)
+	        	targetSlot = 0;
+	        
+	        if (targetSlot <= 8) {
+	        	client.player.getInventory().setSelectedSlot(targetSlot);
+	        	swapped = true;
+	        } else {
+	        	swapSlots(targetSlot, 0);
+	        	client.player.getInventory().setSelectedSlot(0);
+	        	swapped = true;
+	        }
         }
         
         if (!canAttack(target)) return false;
@@ -1250,9 +1307,11 @@ public class QueryClient {
 	            client.player.jump();  // trigger jump
 	
         	} else if (client.player.getVelocity().y < 0) { // Wait until falling (this example assumes this is in a tick loop or similar)
-                return performAttack(target);
+                swapped = false;
+        		return performAttack(target);
             }
         } else {
+        	swapped = false;
             return performAttack(target);
         }
         return false;

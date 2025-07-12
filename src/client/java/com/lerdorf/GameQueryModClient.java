@@ -65,7 +65,7 @@ public class GameQueryModClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         LOGGER.info("GameQuery client mod initializing...");
-
+        
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             boolean isInWorld = client.world != null && client.player != null;
 
