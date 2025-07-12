@@ -566,6 +566,14 @@ public class QueryClient {
 					}
 					break;
 				}
+				case "shield":
+				{
+					int ticks = 20;
+					if (query.has("ticks"))
+						ticks = query.get("ticks").getAsInt();
+					syncResponse.addProperty("success", useShield(ticks));
+					break;
+				}
 				default:
 					syncResponse.addProperty("error", "Unknown query type: " + type);
 				}
