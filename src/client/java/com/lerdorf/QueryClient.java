@@ -35,6 +35,7 @@ import net.minecraft.item.AxeItem;
 import net.minecraft.item.BowItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.item.ShieldItem;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EquipmentSlot;
@@ -1251,6 +1252,36 @@ public class QueryClient {
     int hitCountDown = 0;
     int baritoneCooldown = 0;
     
+    public boolean useShield(int ticks) {
+        if (client.player == null || client.interactionManager == null) return false;
+
+        ItemStack offhand = client.player.getOffHandStack();
+        if (!(offhand.getItem() instanceof ShieldItem)) {
+        	offhand = equipShieldIfAvailable();
+        	 if (!(offhand.getItem() instanceof ShieldItem)) {
+	            System.out.println("No shield in offhand");
+	            return false;
+        	 }
+        }
+
+		if (!isOnCooldown(client.player, shield)) {
+				
+	        // Start using the shield
+	        client.interactionManager.interactItem(client.player, Hand.OFF_HAND);
+	
+	        // Schedule stop after 3 seconds (60 ticks)
+	        delayedTask(() -> {
+	            if (client.player.isUsingItem() && client.player.getActiveHand() == Hand.OFF_HAND) {
+	                client.interactionManager.stopUsingItem(client.player);
+	            }
+	        }, ticks);
+	
+			return true;
+		}
+		return false;
+    }
+
+    
 	public void tick() {
 		if (delayedTasks.size() > 0) {
 			ArrayList<Runnable> remove = new ArrayList<>();
@@ -1300,13 +1331,21 @@ public class QueryClient {
 	            }
 	        }
 	        if (closestTarget != null) {
-	        	if (distance < 36 || !killauraBow) {
+	        	if (distance < 6*6 || !killauraBow) {
+	        		if (c % 6 == 0 && Math.random() > 0.5) {
+		        		shield = equipShieldIfAvailable();
+		        		if (!isOnCooldown(client.player, shield)) {
+		        			useShield((int)(10*Math.random()*30));
+		        			return;
+		        		}
+	        		}
 			        hit = attack(closestTarget, useCrits);
 		            if (hit) {
 		            	hitCountDown = 5;
 		            	useCrits = false;
 		            }
-	        	} else if (killauraBow && hasLineOfSight && distance < 114*114) {
+	        	} 
+	        	if (killauraBow && hasLineOfSight && distance < 114*114) {
 	        		boolean hasArrows = false;
 	        		for (int i = 0; i < client.player.getInventory().size(); i++) {
 	        			ItemStack stack = client.player.getInventory().getStack(i);
@@ -1369,7 +1408,39 @@ public class QueryClient {
             && player.getActiveItem().getItem() instanceof ShieldItem;
     }
 	
+    private boolean hasMeleeWeapon(PlayerEntity player) {
+        ItemStack main = player.getMainHandStack();
+        String name = main.getItem().getTranslationKey().toLowerCase();
+        return name.contains("sword") || name.contains("axe");
+    }
+
+    private boolean isOnCooldown(ClientPlayerEntity player, ItemStack stack) {
+        return player.getItemCooldownManager().isCoolingDown(stack);
+    }
+
+    private ItemStack equipShieldIfAvailable() {
+        for (int i = 0; i < client.player.getInventory().size(); i++) {
+            ItemStack stack = client.player.getInventory().getStack(i);
+            if (stack.getItem() instanceof ShieldItem) {
+                // Swap with offhand
+                client.interactionManager.clickSlot(
+                    client.player.currentScreenHandler.syncId,
+                    i,
+                    40, // Offhand slot index
+                    SlotActionType.SWAP,
+                    client.player
+                );
+                return stack;
+            }
+        }
+        return null;
+    }
+    
     boolean swapped = false;
+    
+    ItemStack shield = null;
+    
+    int shieldTimer = 0;
     
 	public boolean attack(Entity target, boolean isCrit) {
         if (client.player == null || client.world == null || target == null) return false;
@@ -1391,8 +1462,12 @@ public class QueryClient {
 	        
 	        boolean useAxe = isCrit && Math.random() > 0.5;
 	        
-	        if (target instanceof PlayerEntity p && isBlockingWithShield(p))
-	        	useAxe = true;
+	        if (target instanceof PlayerEntity p) {
+	            if (isBlockingWithShield(p)) {
+	                useAxe = true;
+	            }
+
+	        }
 	        
 	        if (axeSlot == -1)
 	        	useAxe = false;
