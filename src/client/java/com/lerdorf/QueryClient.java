@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.mojang.authlib.GameProfile;
 import com.mojang.datafixers.util.Either;
 
 import net.minecraft.client.MinecraftClient;
@@ -37,6 +38,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.item.ShieldItem;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
@@ -45,6 +47,7 @@ import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerEntity.SleepFailureReason;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.potion.Potion;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.Direction;
@@ -53,10 +56,12 @@ import net.minecraft.util.math.Vec3d;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -157,6 +162,9 @@ public class QueryClient {
 				switch (type) {
 				case "inventory":
 					syncResponse.add("inventory", getPlayerInventory());
+					break;
+				case "get_chat":
+					syncResponse.add("result", getUnreadChat());
 					break;
 				case "position":
 					syncResponse.add("position", getPlayerPosition());
@@ -532,6 +540,10 @@ public class QueryClient {
 						killauraBaritone = query.get("baritone").getAsBoolean();
 					}
 					syncResponse.addProperty("baritone", killauraBaritone);
+					if (query.has("defend") ) {
+						defend = query.get("defend").getAsBoolean();
+					}
+					syncResponse.addProperty("defend", defend);
 					if (query.has("clear") && query.get("clear").getAsBoolean()) {
 						killauraTargets.clear();
 					}
@@ -574,6 +586,16 @@ public class QueryClient {
 					syncResponse.addProperty("success", useShield(ticks));
 					break;
 				}
+				case "eat":
+				{
+					syncResponse.addProperty("successn", eatUntilFull());
+					break;
+				}
+				case "heal":
+				{
+					syncResponse.addProperty("successn", tryToHeal());
+					break;
+				}
 				default:
 					syncResponse.addProperty("error", "Unknown query type: " + type);
 				}
@@ -587,6 +609,185 @@ public class QueryClient {
 			response.addProperty("error", "Error processing query: " + e.getMessage());
 			return response;
 		}
+	}
+	
+	private static final Set<Item> FOOD_ITEMS = Set.of(
+		    Items.APPLE,
+		    Items.BREAD,
+		    Items.COOKED_BEEF,
+		    Items.COOKED_CHICKEN,
+		    Items.COOKED_COD,
+		    Items.COOKED_MUTTON,
+		    Items.COOKED_PORKCHOP,
+		    Items.COOKED_RABBIT,
+		    Items.COOKED_SALMON,
+		    Items.GOLDEN_APPLE,
+		    Items.ENCHANTED_GOLDEN_APPLE,
+		    Items.BAKED_POTATO,
+		    Items.CARROT,
+		    Items.GOLDEN_CARROT,
+		    Items.BEEF,
+		    Items.SUSPICIOUS_STEW,
+		    Items.MUSHROOM_STEW,
+		    Items.BEETROOT_SOUP,
+		    Items.POTATO,
+		    Items.COOKIE,
+		    Items.MELON_SLICE,
+		    Items.PUMPKIN_PIE,
+		    Items.ROTTEN_FLESH,
+		    Items.CHICKEN,
+		    Items.COD,
+		    Items.SALMON,
+		    Items.RABBIT,
+		    Items.PORKCHOP,
+		    Items.MUTTON,
+		    Items.DRIED_KELP
+		    // Add more as needed
+		);
+	
+	public boolean isFood(ItemStack stack) {
+	    return FOOD_ITEMS.contains(stack.getItem());
+	}
+	
+	public boolean eatUntilFull() {
+	    if (client.player == null || client.interactionManager == null || client.world == null) return false;
+
+	    // Stop if already full
+	    if (client.player.getHungerManager().getFoodLevel() > 19) {
+	        return false;
+	    }
+
+	    // Step 1: Find best food item (by stack size)
+	    int bestSlot = -1;
+	    int maxCount = 0;
+
+	    for (int i = 0; i < client.player.getInventory().size(); i++) {
+	        ItemStack stack = client.player.getInventory().getStack(i);
+	        if (isFood(stack)) {
+	            if (stack.getCount() > maxCount) {
+	                maxCount = stack.getCount();
+	                bestSlot = i;
+	            }
+	        }
+	    }
+
+	    if (bestSlot == -1) {
+	        System.out.println("No food found in inventory.");
+	        return false;
+	    }
+
+	    int hotbarSlot = 7; // You can choose any hotbar slot you want to use
+	    if (bestSlot >= 9) {
+	        swapSlots(bestSlot, hotbarSlot);
+	    } else {
+	        hotbarSlot = bestSlot;
+	    }
+
+	    client.player.getInventory().setSelectedSlot(hotbarSlot);
+
+	    // Step 2: Eat until full
+	    Runnable startEating = new Runnable() {
+	        @Override
+	        public void run() {
+	            if (client.player == null || client.interactionManager == null) return;
+	            if (client.player.getHungerManager().getFoodLevel() > 19) return;
+
+	            ItemStack food = client.player.getMainHandStack();
+	            if (!isFood(food) || food.isEmpty()) return;
+
+	            // Start eating
+	            client.interactionManager.interactItem(client.player, Hand.MAIN_HAND);
+
+	            // Schedule stop using item after 32 ticks (1.6s, enough for most foods)
+	            delayedTask(() -> {
+	                if (client.player != null && client.player.isUsingItem()) {
+	                    client.interactionManager.stopUsingItem(client.player);
+
+	                    // Schedule another bite if still hungry and food remains
+	                    delayedTask(this, 5); // delay before next bite
+	                }
+	            }, 32);
+	        }
+	    };
+
+	    delayedTask(startEating, 2);
+	    
+	    return true;
+	}
+	
+	public boolean tryToHeal() {
+	    if (client.player == null || client.interactionManager == null || client.world == null) return false;
+
+	    float currentHealth = client.player.getHealth();
+	    float maxHealth = client.player.getMaxHealth();
+	    if (currentHealth >= maxHealth) return false;
+
+	    int hotbarSlot = 6; // Slot to use for healing item
+
+	    int healSlot = -1;
+	    Item healItem = null;
+
+	    // Priority list of healing items
+	    List<Item> healingItems = List.of(
+	        Items.ENCHANTED_GOLDEN_APPLE,
+	        Items.GOLDEN_APPLE,
+		    Items.POTION,
+	        Items.SUSPICIOUS_STEW,
+	        Items.MUSHROOM_STEW,
+	        Items.RABBIT_STEW,
+	        Items.BEETROOT_SOUP
+	    );
+
+	    // Step 1: Find healing item in inventory
+	    for (int i = 0; i < client.player.getInventory().size(); i++) {
+            ItemStack stack = client.player.getInventory().getStack(i);
+            if (!stack.isEmpty()) {
+            	for (Item item : healingItems) {
+        	        if (stack.getItem() == item) {
+        	        	if (item == Items.POTION && !(stack.getName().getString().toLowerCase().contains("heal") || stack.getName().getString().toLowerCase().contains("regen"))) {
+                            continue; // Skip potions that don't heal
+                        }
+
+                        healSlot = i;
+                        healItem = item;
+                        break;
+        	        }
+        	    }
+            }
+        }
+	    
+
+	    if (healSlot == -1) {
+	        System.out.println("No healing item found.");
+	        return false;
+	    }
+
+	    // Step 2: Swap to hotbar if needed
+	    if (healSlot >= 9) {
+	        swapSlots(healSlot, hotbarSlot);
+	    } else {
+	        hotbarSlot = healSlot;
+	    }
+
+	    client.player.getInventory().setSelectedSlot(hotbarSlot);
+
+	    // Step 3: Use item
+	    Runnable useItem = () -> {
+	        if (client.player.getMainHandStack().isEmpty()) return;
+
+	        // Begin using
+	        client.interactionManager.interactItem(client.player, Hand.MAIN_HAND);
+
+	        // Stop using after 32 ticks (~1.6 seconds)
+	        delayedTask(() -> {
+	            if (client.player != null && client.player.isUsingItem()) {
+	                client.interactionManager.stopUsingItem(client.player);
+	            }
+	        }, 32);
+	    };
+
+	    delayedTask(useItem, 2); // Slight delay to allow the swap
+	    return true;
 	}
 	
 	public JsonObject getOnlinePlayers() {
@@ -2075,7 +2276,49 @@ public class QueryClient {
 
 		return worldInfo;
 	}
+	
+	public static class FancyMessage {
+		public String text;
+		public GameProfile sender;
+		public Instant timestamp;
+		
+		public FancyMessage(String text, GameProfile sender, Instant timestamp) {
+			this.text = text;
+			this.sender = sender;
+			this.timestamp = timestamp;
+		}
+	}
+	
+	public static List<FancyMessage> unreadChat = new ArrayList<>();
 
+	private JsonObject getUnreadChat() {
+		JsonObject result = new JsonObject();
+		List<JsonObject> messages = new ArrayList<>();
+		
+		try {
+			if (unreadChat.size() > 0) {
+				result.addProperty("new_chat", true);
+				for (FancyMessage msg : unreadChat) {
+					JsonObject msgObject = new JsonObject();
+					msgObject.addProperty("text", msg.text);
+					msgObject.addProperty("sender", msg.sender.getName());
+					msgObject.addProperty("timestamp", msg.timestamp.toString());
+					messages.add(msgObject);
+				}
+				unreadChat.clear();
+				result.add("messages", gson.toJsonTree(messages));
+			} else {
+				result.addProperty("new_chat", false);
+				result.add("messages", null);
+			}
+		} catch (Exception e) {
+			result.addProperty("success", false);
+			result.addProperty("error", "Failed to read chat: " + e.getMessage());
+		}
+		
+		return result;
+	}
+	
 	private JsonObject sendChatMessage(String message) {
 		JsonObject result = new JsonObject();
 

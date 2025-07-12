@@ -6,12 +6,17 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.MinecraftClient;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.mojang.authlib.GameProfile;
+
 import net.minecraft.client.toast.SystemToast;
 import net.minecraft.client.toast.Toast;
 import net.minecraft.entity.LivingEntity;
@@ -83,10 +88,21 @@ public class GameQueryModClient implements ClientModInitializer {
             wasInWorld = isInWorld;
         });
         
+        ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, receptionTimestamp) -> {
+            handleChatMessage(message.getString(), sender, receptionTimestamp);
+        });
+        
         registerDamageHandler();
 
         LOGGER.info("GameQuery client mod initialized!");
     }
+    
+    private void handleChatMessage(String message, GameProfile sender, Instant timestamp) {
+        //System.out.println("Chat: " + message);
+    	QueryClient.unreadChat.add(new QueryClient.FancyMessage(message, sender, timestamp));
+        
+    }
+
     
     private void onWorldJoined(MinecraftClient client) {
         if (queryClient == null) {
