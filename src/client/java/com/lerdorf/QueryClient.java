@@ -507,10 +507,10 @@ public class QueryClient {
 					}
 					if (query.has("enable")) {
 						killauraEnabled = query.get("enable").getAsBoolean();
-						syncResponse.addProperty("enabled", killauraEnabled);
 					}
+					syncResponse.addProperty("enabled", killauraEnabled);
 					if (query.has("remove")) {
-						String id = query.get("target").getAsString();
+						String id = query.get("remove").getAsString();
 						UUID uuid = UUID.fromString(id);
 						if (uuid != null) {
 							if (killauraTargets.contains(uuid)) {
@@ -523,6 +523,14 @@ public class QueryClient {
 							syncResponse.addProperty("remove_result", "failure - unknown entity");
 						}
 					}
+					if (query.has("use_bow")) {
+						killauraBow = query.get("use_bow").getAsBoolean();
+					}
+					syncResponse.addProperty("use_bow", killauraBow);
+					if (query.has("baritone") ) {
+						killauraBaritone = query.get("baritone").getAsBoolean();
+					}
+					syncResponse.addProperty("baritone", killauraBaritone);
 					if (query.has("clear") && query.get("clear").getAsBoolean()) {
 						killauraTargets.clear();
 					}
@@ -822,109 +830,158 @@ public class QueryClient {
         return a*Math.pow(range, n) + b*Math.pow(range, m) + c;
 	}
 	
+	public float[] getMovingTarget(LivingEntity target, float overshoot) {
+		float[] result = {0, 0, 0};
+		
+		float distance = (float)client.player.getPos().distanceTo(target.getPos());
+		float time = distance/52f; // time in seconds
+		
+		result[0] = (float)(target.getX() + target.getVelocity().getX()*20*time);
+		result[1] = (float)(target.getX() + target.getVelocity().getY()*20*time);
+		result[2] = (float)(target.getX() + target.getVelocity().getZ()*20*time);
+		
+		return result;
+	}
+	
 	public JsonElement shootBowAt(LivingEntity target, float overshoot) {
 		JsonObject result = new JsonObject();
 	    ClientPlayerEntity player = client.player;
 
 	    // Step 1: Find bow and switch to that slot
 	    int bowSlot = -1;
-	    for (int i = 0; i < player.getInventory().size(); i++) {
-	        ItemStack stack = player.getInventory().getStack(i);
-	        if (stack.getItem() instanceof BowItem) {
-	            bowSlot = i;
-	            break;
-	        }
-	    }
+	    bowSlot = getHighestPowerSlot("bow");
 	    if (bowSlot == -1) {
 	        System.out.println("No bow found in inventory.");
 	        result.addProperty("error", "no bow found in inventory");
 	        return result;
+	    } else {
+	    	if (bowSlot <= 8) {
+	    		player.getInventory().setSelectedSlot(bowSlot);
+	    	} else {
+	    		player.getInventory().setSelectedSlot(1);
+	    		swapSlots(bowSlot, 1);
+	    	}
 	    }
 
         result.addProperty("bow_slot", bowSlot);
 	    int finalBowSlot = bowSlot;
 	    
+	    ItemStack heldItem = player.getMainHandStack();
+	    boolean isCrossbow = heldItem.getItem().toString().toLowerCase().contains("crossbow");
+	    
 	    client.execute(() -> {
 	        try {
 	            player.getInventory().setSelectedSlot(finalBowSlot);
 
+	            float[] pos = getMovingTarget(target, overshoot);
 	            // Step 2: Aim at target
-	            JsonObject rotationResult = pointToXYZ((float)target.getX(), (float)(target.getY()+target.getHeight()), (float)target.getZ());
+	            JsonObject rotationResult = pointToXYZ(pos[0], (float)(pos[1]+target.getHeight()), pos[2]);
 	            if (!rotationResult.get("success").getAsBoolean()) {
 	                System.out.println("Failed to rotate toward target.");
 	    	        result.addProperty("error", "failed to rotate player");
 	                return;
 	            }
 	            
-	            rotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot + Math.sqrt(Math.pow(player.getX()-target.getX(), 2) + Math.pow(player.getZ()-target.getZ(), 2)))));
+	            rotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot + Math.sqrt(Math.pow(player.getX()-pos[0], 2) + Math.pow(player.getZ()-pos[2], 2)))));
 	            if (!rotationResult.get("success").getAsBoolean()) {
 	                System.out.println("Failed to rotate toward target.");
 	    	        result.addProperty("error", "failed to rotate player");
 	                return;
 	            }
 	            
-	            
-	            // Step 3: Start drawing the bow
-	            client.interactionManager.interactItem(player, Hand.MAIN_HAND);
+	            if (!isCrossbow) {
+	                // Bow logic (unchanged)
+		            // Step 3: Start drawing the bow
+		            client.interactionManager.interactItem(player, Hand.MAIN_HAND);
+	
+		            // Continue aiming
+		            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+		                client.execute(() -> {
+		                	float[] newPos = getMovingTarget(target, overshoot);
+		    	            // Step 2: Aim at target
+		    	            JsonObject newRotationResult = pointToXYZ(newPos[0], (float)(newPos[1]+target.getHeight()), newPos[2]);
+		    	            if (!newRotationResult.get("success").getAsBoolean()) {
+		    	                System.out.println("Failed to rotate toward target.");
+		    	    	        result.addProperty("error", "failed to rotate player");
+		    	                return;
+		    	            }
+		    	            
+		    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot + Math.sqrt(Math.pow(player.getX()-newPos[0], 2) + Math.pow(player.getZ()-newPos[2], 2)))));
+		    	            if (!newRotationResult.get("success").getAsBoolean()) {
+		    	                System.out.println("Failed to rotate toward target.");
+		    	    	        result.addProperty("error", "failed to rotate player");
+		    	                return;
+		    	            }
+		                });
+		            }, 900, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+		            
+		            // Continue aiming
+		            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+		                client.execute(() -> {
+		                	float[] newPos = getMovingTarget(target, overshoot);
+		    	            // Step 2: Aim at target
+		    	            JsonObject newRotationResult = pointToXYZ(newPos[0], (float)(newPos[1]+target.getHeight()), newPos[2]);
+		    	            if (!newRotationResult.get("success").getAsBoolean()) {
+		    	                System.out.println("Failed to rotate toward target.");
+		    	    	        result.addProperty("error", "failed to rotate player");
+		    	                return;
+		    	            }
+		    	            
+		    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot + Math.sqrt(Math.pow(player.getX()-newPos[0], 2) + Math.pow(player.getZ()-newPos[2], 2)))));
+		    	            if (!newRotationResult.get("success").getAsBoolean()) {
+		    	                System.out.println("Failed to rotate toward target.");
+		    	    	        result.addProperty("error", "failed to rotate player");
+		    	                return;
+		    	            }
+		                });
+		            }, 1200, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+		            
+		            // Step 4 + 5: Wait and release
+		            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+		                client.execute(() -> {
+		                	JsonObject newRotationResult = pointToXYZ((float)target.getX(), (float)(target.getY()+target.getHeight()), (float)target.getZ());
+		    	            if (!newRotationResult.get("success").getAsBoolean()) {
+		    	                System.out.println("Failed to rotate toward target.");
+		    	    	        result.addProperty("error", "failed to rotate player");
+		    	                return;
+		    	            }
+		    	            
+		    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-target.getX(), 2) + Math.pow(player.getZ()-target.getZ(), 2)))));
+		    	            if (!newRotationResult.get("success").getAsBoolean()) {
+		    	                System.out.println("Failed to rotate toward target.");
+		    	    	        result.addProperty("error", "failed to rotate player");
+		    	                return;
+		    	            }
+		                    client.interactionManager.stopUsingItem(player);
+			    	        result.addProperty("success", "arrow has been launched");
+		                });
+		            }, 1150, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+	            } else {
+	            	// Crossbow logic
+	                client.interactionManager.interactItem(player, Hand.MAIN_HAND); // Start charging
 
-	            // Continue aiming
-	            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
-	                client.execute(() -> {
-	                	JsonObject newRotationResult = pointToXYZ((float)target.getX(), (float)(target.getY()+target.getHeight()), (float)target.getZ());
-	    	            if (!newRotationResult.get("success").getAsBoolean()) {
-	    	                System.out.println("Failed to rotate toward target.");
-	    	    	        result.addProperty("error", "failed to rotate player");
-	    	                return;
-	    	            }
-	    	            
-	    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-target.getX(), 2) + Math.pow(player.getZ()-target.getZ(), 2)))));
-	    	            if (!newRotationResult.get("success").getAsBoolean()) {
-	    	                System.out.println("Failed to rotate toward target.");
-	    	    	        result.addProperty("error", "failed to rotate player");
-	    	                return;
-	    	            }
-	                });
-	            }, 900, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
-	            
-	            // Continue aiming
-	            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
-	                client.execute(() -> {
-	                	JsonObject newRotationResult = pointToXYZ((float)target.getX(), (float)(target.getY()+target.getHeight()), (float)target.getZ());
-	    	            if (!newRotationResult.get("success").getAsBoolean()) {
-	    	                System.out.println("Failed to rotate toward target.");
-	    	    	        result.addProperty("error", "failed to rotate player");
-	    	                return;
-	    	            }
-	    	            
-	    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-target.getX(), 2) + Math.pow(player.getZ()-target.getZ(), 2)))));
-	    	            if (!newRotationResult.get("success").getAsBoolean()) {
-	    	                System.out.println("Failed to rotate toward target.");
-	    	    	        result.addProperty("error", "failed to rotate player");
-	    	                return;
-	    	            }
-	                });
-	            }, 1200, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
-	            
-	            // Step 4 + 5: Wait and release
-	            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
-	                client.execute(() -> {
-	                	JsonObject newRotationResult = pointToXYZ((float)target.getX(), (float)(target.getY()+target.getHeight()), (float)target.getZ());
-	    	            if (!newRotationResult.get("success").getAsBoolean()) {
-	    	                System.out.println("Failed to rotate toward target.");
-	    	    	        result.addProperty("error", "failed to rotate player");
-	    	                return;
-	    	            }
-	    	            
-	    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-target.getX(), 2) + Math.pow(player.getZ()-target.getZ(), 2)))));
-	    	            if (!newRotationResult.get("success").getAsBoolean()) {
-	    	                System.out.println("Failed to rotate toward target.");
-	    	    	        result.addProperty("error", "failed to rotate player");
-	    	                return;
-	    	            }
-	                    client.interactionManager.stopUsingItem(player);
-		    	        result.addProperty("success", "arrow has been launched");
-	                });
-	            }, 1300, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+	                Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+	                    client.execute(() -> {
+	                        // Aim again
+	                        float[] aimPos = getMovingTarget(target, overshoot);
+	                        JsonObject newRotationResult = pointToXYZ(aimPos[0], (float)(aimPos[1] + target.getHeight()), aimPos[2]);
+	                        if (!newRotationResult.get("success").getAsBoolean()) {
+	                            result.addProperty("error", "failed to rotate player");
+	                            return;
+	                        }
+
+	                        newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot + Math.sqrt(Math.pow(player.getX()-aimPos[0], 2) + Math.pow(player.getZ()-aimPos[2], 2)))));
+	                        if (!newRotationResult.get("success").getAsBoolean()) {
+	                            result.addProperty("error", "failed to rotate player");
+	                            return;
+	                        }
+
+	                        // Fire the crossbow
+	                        client.interactionManager.interactItem(player, Hand.MAIN_HAND);
+	                        result.addProperty("success", "arrow has been launched (crossbow)");
+	                    });
+	                }, 1300, TimeUnit.MILLISECONDS); // Crossbow full charge
+	            }
 	        } catch (Exception e) {
 	            e.printStackTrace();
 	        }
@@ -1180,13 +1237,19 @@ public class QueryClient {
         return true;
     }
 	
+	public boolean defend = false;
 	public boolean killauraEnabled = false;
+	public boolean killauraBow = false;
+	public boolean killauraBaritone = false;
     public List<UUID> killauraTargets = new ArrayList<>();
 	
     boolean useCrits = true;
+
+	public static UUID attacker = null;
     
     int c = 0;
     int hitCountDown = 0;
+    int baritoneCooldown = 0;
     
 	public void tick() {
 		if (delayedTasks.size() > 0) {
@@ -1204,9 +1267,12 @@ public class QueryClient {
 			}
 		}
         if (!killauraEnabled || client.player == null || client.world == null) return;
+        if (defend && attacker != null) {
+        	killauraTargets.add(attacker);
+        	attacker = null;
+        }
         c++;
-        if (c > 2) {
-        	c = 0;
+        if (c % 3 == 0) {
         	if (hitCountDown > 0) {
         		hitCountDown--;
         	} else {
@@ -1214,26 +1280,67 @@ public class QueryClient {
         	}
 	        boolean hit = false;
 	        ArrayList<UUID> remove = new ArrayList<>();
+	        LivingEntity closestTarget = null;
+	        double distance = -1;
+	        boolean hasLineOfSight = false;
 	        for (UUID uuid : killauraTargets) {
 	            Entity target = client.world.getEntity(uuid);
-	            if (target != null && target.isAlive()) {
-	            	//if (canAttack(target)) {
-		                //lookAtEntity(client.player, target);
-		            hit = attack(target, useCrits);
+	            if (target != null && target.isAlive() && target instanceof LivingEntity le) {
+	            	boolean hasLineOfSightTemp = lineOfSight(target);
+		            if (hasLineOfSightTemp || closestTarget == null) {
+		            	double distanceSq = client.player.squaredDistanceTo(le);
+		                if (closestTarget == null || distanceSq < distance) {
+		                	distance = distanceSq;
+		                	closestTarget = le;
+		                	hasLineOfSight = hasLineOfSightTemp;
+		                }
+		            }
+	            } else {
+	            	remove.add(uuid);
+	            }
+	        }
+	        if (closestTarget != null) {
+	        	if (distance < 36 || !killauraBow) {
+			        hit = attack(closestTarget, useCrits);
 		            if (hit) {
 		            	hitCountDown = 5;
 		            	useCrits = false;
 		            }
-	            	//}
-	            } else {
-	            	remove.add(uuid);
-	            }
+	        	} else if (killauraBow && hasLineOfSight && distance < 114*114) {
+	        		shootBowAt(closestTarget, (float)Math.random()*2);
+	        	}
+	        	if (killauraBaritone && c % 9 == 0) {
+	        		if (baritoneCooldown > 0) {
+	        			baritoneCooldown--;
+	        		} else {
+		        		if (closestTarget instanceof PlayerEntity targetPlayer) {
+		        			sendChatMessage("#follow player " + targetPlayer.getName());
+			        		baritoneCooldown = 10;
+		        		} else {
+		        			sendChatMessage("#goto " + closestTarget.getBlockX() + " " + closestTarget.getBlockY() + " " + closestTarget.getBlockZ());
+		        			baritoneCooldown = 5;
+		        		}
+	        		}
+	        	}
 	        }
 	        for (UUID uuid : remove) {
 	        	killauraTargets.remove(uuid);
 	        }
         }
     }
+	
+	private boolean lineOfSight(Entity target) {
+		// Line of sight check
+        Vec3d eyePos = client.player.getCameraPosVec(1.0F);
+        Vec3d targetPos = target.getPos().add(0, target.getHeight() / 2.0, 0);
+        HitResult hit = client.world.raycast(new RaycastContext(
+            eyePos, targetPos,
+            RaycastContext.ShapeType.COLLIDER,
+            RaycastContext.FluidHandling.NONE,
+            client.player
+        ));
+        return hit.getType() == HitResult.Type.MISS || hit instanceof EntityHitResult;
+	}
 	
     private boolean canAttack(Entity target) {
         if (target == null || !target.isAlive() || target == client.player) return false;
@@ -1243,17 +1350,7 @@ public class QueryClient {
         double distanceSq = client.player.squaredDistanceTo(target);
         if (distanceSq > 9) return false;
 
-        // Line of sight check
-        Vec3d eyePos = client.player.getCameraPosVec(1.0F);
-        Vec3d targetPos = target.getPos().add(0, target.getHeight() / 2.0, 0);
-        HitResult hit = client.world.raycast(new RaycastContext(
-            eyePos, targetPos,
-            RaycastContext.ShapeType.COLLIDER,
-            RaycastContext.FluidHandling.NONE,
-            client.player
-        ));
-
-        return hit.getType() == HitResult.Type.MISS || hit instanceof EntityHitResult;
+        return lineOfSight(target);
     }
     
     public boolean isBlockingWithShield(PlayerEntity player) {

@@ -7,10 +7,14 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
 import net.minecraft.client.MinecraftClient;
+
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import net.minecraft.client.toast.SystemToast;
 import net.minecraft.client.toast.Toast;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.text.Text;
 
 public class GameQueryModClient implements ClientModInitializer {
@@ -18,6 +22,7 @@ public class GameQueryModClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	public static boolean carlsFaceBar = false;
+	
 	
 	//public static Class<?> locatorBarDataClass;
     
@@ -77,6 +82,8 @@ public class GameQueryModClient implements ClientModInitializer {
 
             wasInWorld = isInWorld;
         });
+        
+        registerDamageHandler();
 
         LOGGER.info("GameQuery client mod initialized!");
     }
@@ -109,5 +116,32 @@ public class GameQueryModClient implements ClientModInitializer {
             showToast("GameQuery", "Client mod de-initialized!");
             LOGGER.info("Client query server stopped");
         }
+    }
+    
+    private static float lastHealth = -1;
+    
+    public static void registerDamageHandler() {
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (client.player != null) {
+                float currentHealth = client.player.getHealth();
+
+                if (lastHealth != -1 && currentHealth < lastHealth) {
+                    //System.out.println("Player took damage! New health: " + currentHealth);
+
+                    // Try getting the attacker (will usually be null on client)
+                    {
+                        LivingEntity damager = (LivingEntity) client.player.getAttacker();
+                        if (damager != null) {
+                            //System.out.println("Damaged by: " + attacker.getName().getString());
+                        	QueryClient.attacker = damager.getUuid();
+                        } else {
+                            //System.out.println("Attacker unknown (null)");
+                        }
+                    }
+                }
+
+                lastHealth = currentHealth;
+            }
+        });
     }
 }
