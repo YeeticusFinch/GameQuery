@@ -1307,7 +1307,16 @@ public class QueryClient {
 		            	useCrits = false;
 		            }
 	        	} else if (killauraBow && hasLineOfSight && distance < 114*114) {
-	        		shootBowAt(closestTarget, (float)Math.random()*2);
+	        		boolean hasArrows = false;
+	        		for (int i = 0; i < client.player.getInventory().size(); i++) {
+	        			ItemStack stack = client.player.getInventory().getStack(i);
+	        			if (stack.getItem().getName().getString().contains("arrow")) {
+	        				hasArrows = false;
+	        				break;
+	        			}
+	        		}
+	        		if (hasArrows)
+	        			shootBowAt(closestTarget, (float)Math.random()*2);
 	        	}
 	        	if (killauraBaritone && c % 9 == 0) {
 	        		if (baritoneCooldown > 0) {
