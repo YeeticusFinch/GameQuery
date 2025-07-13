@@ -9,6 +9,7 @@ import com.mojang.authlib.GameProfile;
 import com.mojang.datafixers.util.Either;
 
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.PlayerListEntry;
@@ -183,6 +184,10 @@ public class QueryClient {
 				case "send_chat":
 					String message = query.has("message") ? query.get("message").getAsString() : "";
 					syncResponse.add("result", sendChatMessage(message));
+					break;
+				case "baritone_cmd":
+					String cmd = query.has("cmd") ? query.get("cmd").getAsString() : "";
+					syncResponse.add("result", sendBaritoneCommand(cmd));
 					break;
 				case "drop_item":
 					if (query.has("slot")) {
@@ -583,7 +588,7 @@ public class QueryClient {
 					int ticks = 20;
 					if (query.has("ticks"))
 						ticks = query.get("ticks").getAsInt();
-					syncResponse.addProperty("success", useShield(ticks));
+					syncResponse.addProperty("success", useShield(ticks, null));
 					break;
 				}
 				case "eat":
@@ -1040,20 +1045,53 @@ public class QueryClient {
         return a*Math.pow(range, n) + b*Math.pow(range, m) + c;
 	}
 	
+	public Map<UUID, float[]> histPos = new HashMap<>();
+	float bowLead = 1.7f;
+	
 	public float[] getMovingTarget(LivingEntity target, float overshoot) {
 		float[] result = {0, 0, 0};
 		
 		float distance = (float)client.player.getPos().distanceTo(target.getPos());
 		float time = distance/52f; // time in seconds
 		
-		result[0] = (float)(target.getX() + target.getVelocity().getX()*20*time);
-		result[1] = (float)(target.getX() + target.getVelocity().getY()*20*time);
-		result[2] = (float)(target.getX() + target.getVelocity().getZ()*20*time);
+		Vec3d prevPos = null;
+		float prevPosTimestamp = -1;
+		if (histPos.containsKey(target.getUuid())) {
+			prevPosTimestamp = histPos.get(target.getUuid())[0];
+			prevPos = new Vec3d(histPos.get(target.getUuid())[1], histPos.get(target.getUuid())[2], histPos.get(target.getUuid())[3]);
+		}
+		
+		float timestamp = currentTick;
+		
+		histPos.put(target.getUuid(), new float[] {timestamp, (float)target.getPos().getX(), (float)target.getPos().getY(), (float)target.getPos().getZ()});
+		
+		double dx = 0;
+		double dy = 0;
+		double dz = 0;
+		
+		if (prevPos != null && timestamp - prevPosTimestamp < 2*20) {
+			float timeDiff = (timestamp - prevPosTimestamp)/20;
+			
+			
+			dx = bowLead*time*(target.getPos().getX() - prevPos.x)/timeDiff;
+			dy = 0.4*bowLead*time*(target.getPos().getY() - prevPos.y)/timeDiff;
+			dz = bowLead*time*(target.getPos().getZ() - prevPos.z)/timeDiff;
+
+			if (chatDebug) sendChatMessage("timestamp: " + timestamp + " timediff: " + timeDiff + " v: " + dx + " " + dy + " " + dz);
+		}
+		
+		result[0] = (float)(target.getX() + dx);
+		result[1] = (float)(target.getY() + dy);
+		result[2] = (float)(target.getZ() + dz);
 		
 		return result;
 	}
 	
+	boolean chatDebug = true;
+	boolean usingBow = false;
+	
 	public JsonElement shootBowAt(LivingEntity target, float overshoot) {
+		usingBow = true;
 		JsonObject result = new JsonObject();
 	    ClientPlayerEntity player = client.player;
 
@@ -1062,6 +1100,7 @@ public class QueryClient {
 	    bowSlot = getHighestPowerSlot("bow");
 	    if (bowSlot == -1) {
 	        System.out.println("No bow found in inventory.");
+	        if (chatDebug) sendChatMessage("No bow found in inventory");
 	        result.addProperty("error", "no bow found in inventory");
 	        return result;
 	    } else {
@@ -1088,14 +1127,18 @@ public class QueryClient {
 	            JsonObject rotationResult = pointToXYZ(pos[0], (float)(pos[1]+target.getHeight()), pos[2]);
 	            if (!rotationResult.get("success").getAsBoolean()) {
 	                System.out.println("Failed to rotate toward target.");
+	                if (chatDebug) sendChatMessage("Failed to rotate toward target");
 	    	        result.addProperty("error", "failed to rotate player");
+	    	        usingBow = false;
 	                return;
 	            }
 	            
 	            rotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot + Math.sqrt(Math.pow(player.getX()-pos[0], 2) + Math.pow(player.getZ()-pos[2], 2)))));
 	            if (!rotationResult.get("success").getAsBoolean()) {
 	                System.out.println("Failed to rotate toward target.");
+	                if (chatDebug) sendChatMessage("Failed to rotate toward target");
 	    	        result.addProperty("error", "failed to rotate player");
+	    	        usingBow = false;
 	                return;
 	            }
 	            
@@ -1112,14 +1155,18 @@ public class QueryClient {
 		    	            JsonObject newRotationResult = pointToXYZ(newPos[0], (float)(newPos[1]+target.getHeight()), newPos[2]);
 		    	            if (!newRotationResult.get("success").getAsBoolean()) {
 		    	                System.out.println("Failed to rotate toward target.");
+		    	                if (chatDebug) sendChatMessage("Failed to rotate toward target");
 		    	    	        result.addProperty("error", "failed to rotate player");
+		    	    	        usingBow = false;
 		    	                return;
 		    	            }
 		    	            
 		    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot + Math.sqrt(Math.pow(player.getX()-newPos[0], 2) + Math.pow(player.getZ()-newPos[2], 2)))));
 		    	            if (!newRotationResult.get("success").getAsBoolean()) {
 		    	                System.out.println("Failed to rotate toward target.");
+		    	                if (chatDebug) sendChatMessage("Failed to rotate toward target");
 		    	    	        result.addProperty("error", "failed to rotate player");
+		    	    	        usingBow = false;
 		    	                return;
 		    	            }
 		                });
@@ -1133,18 +1180,22 @@ public class QueryClient {
 		    	            JsonObject newRotationResult = pointToXYZ(newPos[0], (float)(newPos[1]+target.getHeight()), newPos[2]);
 		    	            if (!newRotationResult.get("success").getAsBoolean()) {
 		    	                System.out.println("Failed to rotate toward target.");
+		    	                if (chatDebug) sendChatMessage("Failed to rotate toward target");
 		    	    	        result.addProperty("error", "failed to rotate player");
+		    	    	        usingBow = false;
 		    	                return;
 		    	            }
 		    	            
 		    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot + Math.sqrt(Math.pow(player.getX()-newPos[0], 2) + Math.pow(player.getZ()-newPos[2], 2)))));
 		    	            if (!newRotationResult.get("success").getAsBoolean()) {
 		    	                System.out.println("Failed to rotate toward target.");
+		    	                if (chatDebug) sendChatMessage("Failed to rotate toward target");
 		    	    	        result.addProperty("error", "failed to rotate player");
+		    	    	        usingBow = false;
 		    	                return;
 		    	            }
 		                });
-		            }, 1200, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
+		            }, 1050, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
 		            
 		            // Step 4 + 5: Wait and release
 		            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
@@ -1152,18 +1203,23 @@ public class QueryClient {
 		                	JsonObject newRotationResult = pointToXYZ((float)target.getX(), (float)(target.getY()+target.getHeight()), (float)target.getZ());
 		    	            if (!newRotationResult.get("success").getAsBoolean()) {
 		    	                System.out.println("Failed to rotate toward target.");
+		    	                if (chatDebug) sendChatMessage("Failed to rotate toward target");
 		    	    	        result.addProperty("error", "failed to rotate player");
+		    	    	        usingBow = false;
 		    	                return;
 		    	            }
 		    	            
 		    	            newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-target.getX(), 2) + Math.pow(player.getZ()-target.getZ(), 2)))));
 		    	            if (!newRotationResult.get("success").getAsBoolean()) {
 		    	                System.out.println("Failed to rotate toward target.");
+		    	                if (chatDebug) sendChatMessage("Failed to rotate toward target");
 		    	    	        result.addProperty("error", "failed to rotate player");
+		    	    	        usingBow = false;
 		    	                return;
 		    	            }
 		                    client.interactionManager.stopUsingItem(player);
 			    	        result.addProperty("success", "arrow has been launched");
+			    	        if (chatDebug) sendChatMessage("Arrow has been launched");
 		                });
 		            }, 1150, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
 	            } else {
@@ -1176,30 +1232,38 @@ public class QueryClient {
 	                        float[] aimPos = getMovingTarget(target, overshoot);
 	                        JsonObject newRotationResult = pointToXYZ(aimPos[0], (float)(aimPos[1] + target.getHeight()), aimPos[2]);
 	                        if (!newRotationResult.get("success").getAsBoolean()) {
+	                        	if (chatDebug) sendChatMessage("Failed to rotate toward target");
 	                            result.addProperty("error", "failed to rotate player");
+	                            usingBow = false;
 	                            return;
 	                        }
 
 	                        newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot + Math.sqrt(Math.pow(player.getX()-aimPos[0], 2) + Math.pow(player.getZ()-aimPos[2], 2)))));
 	                        if (!newRotationResult.get("success").getAsBoolean()) {
 	                            result.addProperty("error", "failed to rotate player");
+	                            if (chatDebug) sendChatMessage("Failed to rotate toward target");
+	                            usingBow = false;
 	                            return;
 	                        }
 
 	                        // Fire the crossbow
 	                        client.interactionManager.interactItem(player, Hand.MAIN_HAND);
 	                        result.addProperty("success", "arrow has been launched (crossbow)");
+	                        if (chatDebug) sendChatMessage("Crossbow arrow has been launched");
+	            	        usingBow = false;
 	                    });
 	                }, 1300, TimeUnit.MILLISECONDS); // Crossbow full charge
 	            }
 	        } catch (Exception e) {
 	            e.printStackTrace();
+	            if (chatDebug) sendChatMessage("Error: " + e.getMessage());
 	        }
 	    });
 	    return result;
 	}
 	
 	public JsonElement shootBowAt(float targetX, float targetY, float targetZ, float overshoot) {
+		usingBow = true;
 		JsonObject result = new JsonObject();
 	    ClientPlayerEntity player = client.player;
 
@@ -1215,6 +1279,7 @@ public class QueryClient {
 	    if (bowSlot == -1) {
 	        System.out.println("No bow found in inventory.");
 	        result.addProperty("error", "no bow found in inventory");
+	        usingBow = false;
 	        return result;
 	    }
 
@@ -1230,6 +1295,7 @@ public class QueryClient {
 	            if (!rotationResult.get("success").getAsBoolean()) {
 	                System.out.println("Failed to rotate toward target.");
 	    	        result.addProperty("error", "failed to rotate player");
+	    	        usingBow = false;
 	                return;
 	            }
 	            
@@ -1237,6 +1303,7 @@ public class QueryClient {
 	            if (!rotationResult.get("success").getAsBoolean()) {
 	                System.out.println("Failed to rotate toward target.");
 	    	        result.addProperty("error", "failed to rotate player");
+	    	        usingBow = false;
 	                return;
 	            }
 	            
@@ -1251,12 +1318,14 @@ public class QueryClient {
 	    	            if (!newRotationResult.get("success").getAsBoolean()) {
 	    	                System.out.println("Failed to rotate toward target.");
 	    	    	        result.addProperty("error", "failed to rotate player");
+	    	    	        usingBow = false;
 	    	                return;
 	    	            }
 	                	newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-targetX, 2) + Math.pow(player.getZ()-targetZ, 2)))));
 	    	            if (!newRotationResult.get("success").getAsBoolean()) {
 	    	                System.out.println("Failed to rotate toward target.");
 	    	    	        result.addProperty("error", "failed to rotate player");
+	    	    	        usingBow = false;
 	    	                return;
 	    	            }
 	                });
@@ -1269,12 +1338,14 @@ public class QueryClient {
 	    	            if (!newRotationResult.get("success").getAsBoolean()) {
 	    	                System.out.println("Failed to rotate toward target.");
 	    	    	        result.addProperty("error", "failed to rotate player");
+	    	    	        usingBow = false;
 	    	                return;
 	    	            }
 	                	newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-targetX, 2) + Math.pow(player.getZ()-targetZ, 2)))));
 	    	            if (!newRotationResult.get("success").getAsBoolean()) {
 	    	                System.out.println("Failed to rotate toward target.");
 	    	    	        result.addProperty("error", "failed to rotate player");
+	    	    	        usingBow = false;
 	    	                return;
 	    	            }
 	                });
@@ -1287,16 +1358,19 @@ public class QueryClient {
 	    	            if (!newRotationResult.get("success").getAsBoolean()) {
 	    	                System.out.println("Failed to rotate toward target.");
 	    	    	        result.addProperty("error", "failed to rotate player");
+	    	    	        usingBow = false;
 	    	                return;
 	    	            }
 	                	newRotationResult = rotatePlayer(player.getYaw(), (float)(player.getPitch() + getBowPitch(overshoot+Math.sqrt(Math.pow(player.getX()-targetX, 2) + Math.pow(player.getZ()-targetZ, 2)))));
 	    	            if (!newRotationResult.get("success").getAsBoolean()) {
 	    	                System.out.println("Failed to rotate toward target.");
 	    	    	        result.addProperty("error", "failed to rotate player");
+	    	    	        usingBow = false;
 	    	                return;
 	    	            }
 	                    client.interactionManager.stopUsingItem(player);
 		    	        result.addProperty("success", "arrow has been launched");
+		    	        usingBow = false;
 	                });
 	            }, 1300, TimeUnit.MILLISECONDS); // wait 1 second (full charge)
 	        } catch (Exception e) {
@@ -1304,6 +1378,10 @@ public class QueryClient {
 	        }
 	    });
 	    return result;
+	}
+	
+	boolean isHotbar(int slot) {
+		return slot < 9;
 	}
 	
 	private boolean swapSlots(int slot1, int slot2) {
@@ -1316,9 +1394,17 @@ public class QueryClient {
 	        return false;
 	    }
 	    
+	    Screen prevScreen = client.currentScreen;
+	    
 	    client.setScreen(new InventoryScreen(client.player));
 	    
-	    if (slot1 < 9) {
+	    if (isHotbar(slot1) && !isHotbar(slot2)) {
+	    	if (slot2 == 40) {
+	    		slot2 = 9;
+	    		delayedTask(() -> {
+	    	    	swapSlots(9, 40);
+	    	    }, 2); // run 2 ticks later
+	    	}
 	    	client.interactionManager.clickSlot(
 	    	        client.player.currentScreenHandler.syncId,
 	    	        slot2,
@@ -1326,14 +1412,28 @@ public class QueryClient {
 	    	        SlotActionType.SWAP,
 	    	        client.player
 	    	    );
-	    } else if (slot2 < 9) {
-	    	client.interactionManager.clickSlot(
-	    	        client.player.currentScreenHandler.syncId,
-	    	        slot1,
-	    	        slot2,
-	    	        SlotActionType.SWAP,
-	    	        client.player
-	    	    );
+	    } else if (isHotbar(slot2) && !isHotbar(slot1)) {
+	    	if (slot1 == 40) {
+	    		int ogSlot2 = slot2;
+	    		slot2 = 9;
+	    		// Click slot1 to pick up the item
+			    client.interactionManager.clickSlot(handler.syncId, slot1, 0, SlotActionType.PICKUP, client.player);
+			    // Click slot2 to swap
+			    client.interactionManager.clickSlot(handler.syncId, slot2, 0, SlotActionType.PICKUP, client.player);
+			    // Put the originally picked item back into slot1
+			    client.interactionManager.clickSlot(handler.syncId, slot1, 0, SlotActionType.PICKUP, client.player);
+	    		delayedTask(() -> {
+	    	    	swapSlots(9, ogSlot2);
+	    	    }, 2); // run 2 ticks later
+	    	} else {
+		    	client.interactionManager.clickSlot(
+		    	        client.player.currentScreenHandler.syncId,
+		    	        slot1,
+		    	        slot2,
+		    	        SlotActionType.SWAP,
+		    	        client.player
+		    	    );
+	    	}
 	    } else {
 	
 		    // Click slot1 to pick up the item
@@ -1370,7 +1470,7 @@ public class QueryClient {
 	    }, 1); // run 1 tick1 later
 	    */
 
-    	client.execute(() -> client.setScreen(null));
+    	client.execute(() -> client.setScreen(prevScreen));
 
 	    return true;
 	}
@@ -1383,15 +1483,29 @@ public class QueryClient {
 
 	}
 
+	boolean isType(ItemStack stack, String type) {
+		
+		if (type.toLowerCase().contains("crossbow") && stack.getItem() == Items.CROSSBOW)
+			return true;
+		if (type.toLowerCase().contains("bow") && stack.getItem() == Items.BOW)
+			return true;
+		if (type.toLowerCase().contains("arrow") && (stack.getItem() == Items.ARROW || stack.getItem() == Items.TIPPED_ARROW || stack.getItem() == Items.SPECTRAL_ARROW))
+			return true;
+		if (stack.getItem().getName().getString().toLowerCase().contains(type))
+			return true;
+		return false;
+	}
 	
 	private int getHighestPowerSlot(String type) {
-		float power = 0;
+		float power = -1;
 		int slot = -1;
 		//ItemStack targetStack = null;
 		type = type.toLowerCase();
+		
 		for (int i = 0; i < client.player.getInventory().size(); i++) {
 			ItemStack stack = client.player.getInventory().getStack(i);
-			if (!stack.isEmpty() && stack.getItem().toString().toLowerCase().contains(type)) {
+			if (!stack.isEmpty() && isType(stack, type)) {
+				if (chatDebug) sendChatMessage("Found a " + type);
 				float currentPower = 0;
 				String item = stack.getItem().toString().toLowerCase();
 				if (item.contains("wood")) {
@@ -1461,37 +1575,51 @@ public class QueryClient {
     int hitCountDown = 0;
     int baritoneCooldown = 0;
     
-    public boolean useShield(int ticks) {
-        if (client.player == null || client.interactionManager == null) return false;
+    public boolean useShield(int ticks, LivingEntity target) {
+        if (client.player == null) return false;
 
         ItemStack offhand = client.player.getOffHandStack();
         if (!(offhand.getItem() instanceof ShieldItem)) {
-        	offhand = equipShieldIfAvailable();
-        	 if (!(offhand.getItem() instanceof ShieldItem)) {
-	            System.out.println("No shield in offhand");
-	            return false;
-        	 }
+        	if (chatDebug) sendChatMessage("Equipping Shield");
+            offhand = equipShieldIfAvailable();
+            if (!(offhand.getItem() instanceof ShieldItem)) {
+                if (chatDebug) sendChatMessage("No shield in offhand");
+                return false;
+            }
         }
 
-		if (!isOnCooldown(client.player, shield)) {
-				
-	        // Start using the shield
-	        client.interactionManager.interactItem(client.player, Hand.OFF_HAND);
-	
-	        // Schedule stop after 3 seconds (60 ticks)
-	        delayedTask(() -> {
-	            if (client.player.isUsingItem() && client.player.getActiveHand() == Hand.OFF_HAND) {
-	                client.interactionManager.stopUsingItem(client.player);
-	            }
-	        }, ticks);
-	
-			return true;
-		}
-		return false;
+        if (!isOnCooldown(client.player, offhand)) {
+            // Actually start using the shield
+            client.player.setCurrentHand(Hand.OFF_HAND);
+            
+            if (target != null) {
+            	lookAtEntity(client.player, target);
+            	delayedTask(() -> {
+            		lookAtEntity(client.player, target);
+                }, (int)(ticks*0.3));
+            	delayedTask(() -> {
+            		lookAtEntity(client.player, target);
+                }, (int)(ticks*0.6));
+            }
+
+            // Stop using after N ticks
+            delayedTask(() -> {
+                if (client.player.isUsingItem() && client.player.getActiveHand() == Hand.OFF_HAND) {
+                    client.interactionManager.stopUsingItem(client.player);
+                }
+            }, ticks);
+
+            return true;
+        }
+
+        return false;
     }
 
+    int bowCooldown = 0;
+    long currentTick = 0;
     
 	public void tick() {
+		currentTick++;
 		if (delayedTasks.size() > 0) {
 			ArrayList<Runnable> remove = new ArrayList<>();
 			for (Runnable task : delayedTasks.keySet()) {
@@ -1518,6 +1646,10 @@ public class QueryClient {
         	} else {
         		useCrits = true;
         	}
+        	if (bowCooldown > 0) {
+        		bowCooldown--;
+        		return;
+        	} 
 	        boolean hit = false;
 	        ArrayList<UUID> remove = new ArrayList<>();
 	        LivingEntity closestTarget = null;
@@ -1541,10 +1673,16 @@ public class QueryClient {
 	        }
 	        if (closestTarget != null) {
 	        	if (distance < 6*6 || !killauraBow) {
+	        		if (chatDebug) sendChatMessage("Going in for the melee");
 	        		if (c % 6 == 0 && Math.random() > 0.5) {
+	        			if (chatDebug) sendChatMessage("Trying to block");
 		        		shield = equipShieldIfAvailable();
-		        		if (!isOnCooldown(client.player, shield)) {
-		        			useShield((int)(10*Math.random()*30));
+		        		if (shield == null) {
+		        			if (chatDebug) sendChatMessage("No shield found");
+		        		}
+		        		else if (!isOnCooldown(client.player, shield)) {
+		        			if (chatDebug) sendChatMessage("Using shield");
+		        			useShield((int)(10*Math.random()*30), closestTarget);
 		        			return;
 		        		}
 	        		}
@@ -1553,28 +1691,41 @@ public class QueryClient {
 		            	hitCountDown = 5;
 		            	useCrits = false;
 		            }
-	        	} 
-	        	if (killauraBow && hasLineOfSight && distance < 114*114) {
+	        	} else if (killauraBow && hasLineOfSight && distance < 114*114 && bowCooldown == 0 && Math.random() > 0.5) {
+	        		if (chatDebug) sendChatMessage("Attempting to shoot bow");
 	        		boolean hasArrows = false;
 	        		for (int i = 0; i < client.player.getInventory().size(); i++) {
 	        			ItemStack stack = client.player.getInventory().getStack(i);
-	        			if (stack.getItem().getName().getString().contains("arrow")) {
-	        				hasArrows = false;
-	        				break;
+	        			if (stack != null) {
+		        			Item item = stack.getItem();
+		        			if (item == Items.ARROW ||
+		        			    item == Items.TIPPED_ARROW ||
+		        			    item == Items.SPECTRAL_ARROW) {
+		        			    hasArrows = true;
+		        			    break;
+		        			}
 	        			}
 	        		}
-	        		if (hasArrows)
+	        		if (hasArrows) {
+		        		if (chatDebug) sendChatMessage("Shooting the bow, cooldown = " + bowCooldown);
+	        			bowCooldown = 8;
+	        			sendChatMessage("new bow cooldown = " + bowCooldown);
+	        			sendBaritoneCommand("stop");
 	        			shootBowAt(closestTarget, (float)Math.random()*2);
+	        			return;
+	        		} else {
+		        		if (chatDebug) sendChatMessage("No arrows");
+	        		}
 	        	}
 	        	if (killauraBaritone && c % 9 == 0) {
 	        		if (baritoneCooldown > 0) {
 	        			baritoneCooldown--;
 	        		} else {
 		        		if (closestTarget instanceof PlayerEntity targetPlayer) {
-		        			sendChatMessage("#follow player " + targetPlayer.getName());
+		        			sendBaritoneCommand("follow player " + targetPlayer.getName().getString());
 			        		baritoneCooldown = 10;
 		        		} else {
-		        			sendChatMessage("#goto " + closestTarget.getBlockX() + " " + closestTarget.getBlockY() + " " + closestTarget.getBlockZ());
+		        			sendBaritoneCommand("goto " + closestTarget.getBlockX() + " " + closestTarget.getBlockY() + " " + closestTarget.getBlockZ());
 		        			baritoneCooldown = 5;
 		        		}
 	        		}
@@ -2317,6 +2468,28 @@ public class QueryClient {
 		}
 		
 		return result;
+	}
+	
+	private JsonObject sendBaritoneCommand(String cmd) {
+		JsonObject result = new JsonObject();
+		if (cmd == null || cmd.trim().isEmpty()) {
+			result.addProperty("success", false);
+			result.addProperty("error", "Command cannot be empty");
+			return result;
+		}
+		/*
+		if (GameQueryModClient.baritone) {
+			try {
+				boolean r = BaritoneAPI.getProvider().getPrimaryBaritone().getCommandManager().execute(cmd);
+				result.addProperty("success", r);
+			} catch (Exception e) {
+				result.addProperty("success", false);
+				result.addProperty("error", e.getMessage());
+			}
+		} else {*/
+			return sendChatMessage("#" + cmd);
+		//}
+		//return result;
 	}
 	
 	private JsonObject sendChatMessage(String message) {

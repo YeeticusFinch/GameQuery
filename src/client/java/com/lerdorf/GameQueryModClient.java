@@ -27,6 +27,7 @@ public class GameQueryModClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	public static boolean carlsFaceBar = false;
+	public static boolean baritone = false;
 	
 	
 	//public static Class<?> locatorBarDataClass;
@@ -115,9 +116,18 @@ public class GameQueryModClient implements ClientModInitializer {
 				LOGGER.info("[CarlsFaceBar integration] carlsfacebar not found");
 			}
         	
+        	if (FabricLoader.getInstance().isModLoaded("baritone")) {
+			    // safe to call Baritone methods using reflection or direct calls if you have access
+        		baritone = true;
+        		
+			} else {
+				LOGGER.info("[Baritone integration] baritone not found");
+			}
+        	
             queryClient = new QueryClient(client, 25566); // Port 25566
             ClientTickEvents.END_CLIENT_TICK.register(tickclient -> {
-                queryClient.tick();
+            	if (queryClient != null)
+            		queryClient.tick();
             });
             queryClient.start();
             showToast("GameQuery", "Client mod initialized!");
