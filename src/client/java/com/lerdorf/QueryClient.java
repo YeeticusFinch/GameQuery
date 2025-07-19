@@ -28,10 +28,15 @@ import net.minecraft.world.RaycastContext;
 import net.minecraft.world.World;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.block.BedBlock;
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.component.ComponentMap;
+import net.minecraft.component.type.ItemEnchantmentsComponent;
+import net.minecraft.enchantment.Enchantment;
+import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.AxeItem;
 import net.minecraft.item.BowItem;
@@ -40,19 +45,28 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.item.ShieldItem;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtList;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.attribute.EntityAttributeModifier;
 import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerEntity.SleepFailureReason;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.potion.Potion;
+import net.minecraft.registry.Registry;
+import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.screen.MerchantScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.village.TradeOffer;
+import net.minecraft.village.TradedItem;
 
 import java.io.*;
 import java.net.ServerSocket;
@@ -60,8 +74,11 @@ import java.net.Socket;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -175,9 +192,17 @@ public class QueryClient {
 					syncResponse.add("blocks", getBlocksAroundPlayer(range));
 					break;
 				case "entities":
+				{
 					int entityRange = query.has("range") ? query.get("range").getAsInt() : 10;
 					syncResponse.add("entities", getEntitiesAroundPlayer(entityRange));
 					break;
+				}
+				case "items":
+				{
+					int entityRange = query.has("range") ? query.get("range").getAsInt() : 10;
+					syncResponse.add("entities", getItemsAroundPlayer(entityRange));
+					break;
+				}
 				case "world_info":
 					syncResponse.add("world_info", getWorldInfo());
 					break;
@@ -411,6 +436,9 @@ public class QueryClient {
 				case "open_container":
 					syncResponse.add("result", openContainerUnderCrosshair());
 					break;
+				case "open_crafting_table":
+					syncResponse.add("result", openTableUnderCrosshair());
+					break;
 				case "attack":
 					syncResponse.add("result", attackEntityUnderCrosshair());
 					break;
@@ -558,11 +586,16 @@ public class QueryClient {
 				case "kill_aura_targets":
 				{
 					syncResponse.addProperty("enabled", killauraEnabled);
-					JsonObject targets = new JsonObject();
-					if (killauraTargets.size() > 0) {
-						for (UUID uuid : killauraTargets) {
-							targets.addProperty("uuid", uuid.toString());
-						}
+					JsonArray targets = new JsonArray();
+					for (UUID uuid : killauraTargets) {
+					    Entity entity = client.world.getEntity(uuid);
+					    if (entity != null) {
+					        JsonObject entry = new JsonObject();
+					        entry.addProperty("uuid", uuid.toString());
+					        entry.addProperty("name", entity.getName().getString());
+					        entry.addProperty("entity_type", entity.getType().toString());
+					        targets.add(entry);
+					    }
 					}
 					syncResponse.add("result", targets);
 					break;
@@ -601,6 +634,56 @@ public class QueryClient {
 					syncResponse.addProperty("successn", tryToHeal());
 					break;
 				}
+				case "open_villager":
+				{
+					try {
+						if (query.has("uuid")) {
+							UUID id = UUID.fromString(query.get("uuid").getAsString());
+							syncResponse.addProperty("success", openVillagerTradeByUuid(id));
+						} else if (query.has("x") && query.has("y") && query.has("z")) {
+							syncResponse.addProperty("success", openVillagerTradeAtPos(new BlockPos(query.get("x").getAsInt(), query.get("y").getAsInt(), query.get("z").getAsInt())));
+						}
+					} catch (Exception e) {
+						syncResponse.addProperty("error", e.getMessage());
+					}
+					break;
+				}
+				case "trade":
+				{
+					try {
+						if (query.has("output")) {
+							syncResponse.addProperty("result", performTrade(query.get("output").getAsString(), null, -1));
+						} else if (query.has("input")) {
+							syncResponse.addProperty("result", performTrade(null, query.get("input").getAsString(), -1));
+						} else if (query.has("index")) {
+							syncResponse.addProperty("result", performTrade(null, null, query.get("index").getAsInt()));
+						}
+					} catch (Exception e) {
+						syncResponse.addProperty("error", e.getMessage());
+					}
+					break;
+				}
+				case "break":
+				{
+					syncResponse.addProperty("success", breakBlockUnderCrosshair());
+					break;
+				}
+				case "break_tree":
+				{
+					try {
+						if (!(client.crosshairTarget instanceof BlockHitResult hit)) 
+							syncResponse.addProperty("error", "No block on crosshair");
+						else
+							breakTreeAndReplant(hit.getBlockPos());
+					} catch (Exception e) {
+						
+					}
+				}
+				case "is_breaking_tree":
+				{
+					syncResponse.addProperty("result", isChoppingTree && !logsToBreak.isEmpty());
+					break;
+				}
 				default:
 					syncResponse.addProperty("error", "Unknown query type: " + type);
 				}
@@ -616,6 +699,295 @@ public class QueryClient {
 		}
 	}
 	
+	private Queue<BlockPos> logsToBreak = new LinkedList<>();
+	private List<BlockPos> replantSpot = null;
+	private boolean isChoppingTree = false;
+	
+	private void plantSaplingAt(BlockPos pos) {
+	    for (int i = 0; i < client.player.getInventory().size(); i++) {
+	        ItemStack stack = client.player.getInventory().getStack(i);
+	        if (stack.getItem().getTranslationKey().contains("sapling")) {
+	            if (i < 9) {
+	                client.player.getInventory().setSelectedSlot(i);
+	            } else {
+	                swapSlots(i, 5);
+	                client.player.getInventory().setSelectedSlot(5);
+	            }
+
+	            pointToXYZ(pos.getX()+0.5f, pos.getY(), pos.getZ()+0.5f);
+	            BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(pos.down()), Direction.UP, pos.down(), false);
+	            client.interactionManager.interactBlock(client.player, Hand.MAIN_HAND, hit);
+	            client.player.swingHand(Hand.MAIN_HAND);
+	            sendChatMessage("Planted sapling at " + pos.toShortString());
+	            return;
+	        }
+	    }
+
+	    sendChatMessage("No sapling found to plant.");
+	}
+
+	public void breakTreeAndReplant(BlockPos basePos) {
+	    if (client.world == null || client.player == null) return;
+
+	    while (client.world.getBlockState(basePos.down()).getBlock().getTranslationKey().contains("log")) {
+	    	basePos = basePos.down();
+	    }
+	    
+	    BlockPos cursor = basePos;
+	    BlockState state;
+	    replantSpot.clear();
+	    logsToBreak.clear();
+	    replantSpot.add(basePos);
+	    isChoppingTree = true;
+	    
+	    boolean north = false;
+	    boolean northeast = false;
+	    boolean northwest = false;
+	    boolean east = false;
+	    boolean west = false;
+	    boolean south = false;
+	    boolean southeast = false;
+	    boolean southwest = false;
+
+	    if (client.world.getBlockState(basePos.north()).getBlock().getTranslationKey().contains("log")) {
+	    	north = true;
+	    	replantSpot.add(basePos.north());
+	    }
+	    if (client.world.getBlockState(basePos.north().east()).getBlock().getTranslationKey().contains("log")) {
+	    	northeast = true;
+	    	replantSpot.add(basePos.north().east());
+	    }
+	    if (client.world.getBlockState(basePos.north().west()).getBlock().getTranslationKey().contains("log")) {
+	    	northwest = true;
+	    	replantSpot.add(basePos.north().west());
+	    }
+	    if (client.world.getBlockState(basePos.east()).getBlock().getTranslationKey().contains("log")) {
+	    	east = true;
+	    	replantSpot.add(basePos.east());
+	    }
+	    if (client.world.getBlockState(basePos.west()).getBlock().getTranslationKey().contains("log")) {
+	    	west = true;
+	    	replantSpot.add(basePos.west());
+	    }
+	    if (client.world.getBlockState(basePos.south()).getBlock().getTranslationKey().contains("log")) {
+	    	south = true;
+	    	replantSpot.add(basePos.south());
+	    }
+	    if (client.world.getBlockState(basePos.south().east()).getBlock().getTranslationKey().contains("log")) {
+	    	southeast = true;
+	    	replantSpot.add(basePos.south().east());
+	    }
+	    if (client.world.getBlockState(basePos.south().west()).getBlock().getTranslationKey().contains("log")) {
+	    	southwest = true;
+	    	replantSpot.add(basePos.south().west());
+	    }
+	    
+	    // Climb up the log blocks
+	    while (true) {
+	        state = client.world.getBlockState(cursor);
+	        if (!state.getBlock().getTranslationKey().contains("log")) break;
+
+	        logsToBreak.add(cursor);
+	        if (north) logsToBreak.add(cursor.north());
+	        if (south) logsToBreak.add(cursor.south());
+	        if (east) logsToBreak.add(cursor.east());
+	        if (west) logsToBreak.add(cursor.west());
+	        if (northeast) logsToBreak.add(cursor.north().east());
+	        if (northwest) logsToBreak.add(cursor.north().west());
+	        if (southeast) logsToBreak.add(cursor.north().east());
+	        if (southwest) logsToBreak.add(cursor.north().west());
+	        
+	        cursor = cursor.up();
+	    }
+	}
+	
+
+    public void treeTick() {
+    	if (isChoppingTree && !logsToBreak.isEmpty()) {
+    	    BlockPos next = logsToBreak.peek();
+    	    BlockState state = client.world.getBlockState(next);
+    	    if (!(state.isAir() || state.isLiquid())) {
+    	        // Use tool if needed
+    	        int axeSlot = getHighestPowerSlot("_axe");
+    	        if (axeSlot != -1) {
+    	            if (axeSlot < 9) {
+        	        	client.player.getInventory().setSelectedSlot(axeSlot);
+    	            } else {
+    	                swapSlots(axeSlot, 2);
+    	                client.player.getInventory().setSelectedSlot(2);
+    	            }
+    	        }
+
+    	        // Attack the block
+    	        client.interactionManager.attackBlock(next, Direction.UP);
+    	        client.player.swingHand(Hand.MAIN_HAND);
+    	    } else {
+    	        logsToBreak.poll(); // remove from queue
+    	    }
+
+    	    // Done chopping
+    	    if (logsToBreak.isEmpty()) {
+    	        isChoppingTree = false;
+    	        if (replantSpot.size() > 0) {
+	    	        delayedTask(() -> {
+		    	        plantSaplingAt(replantSpot.get(0));
+				    }, 10);
+    	        }
+    	        if (replantSpot.size() > 1) {
+	    	        delayedTask(() -> {
+		    	        plantSaplingAt(replantSpot.get(1));
+				    }, 10);
+    	        }
+    	        if (replantSpot.size() > 2) {
+	    	        delayedTask(() -> {
+		    	        plantSaplingAt(replantSpot.get(2));
+				    }, 10);
+    	        }
+    	        if (replantSpot.size() > 3) {
+	    	        delayedTask(() -> {
+		    	        plantSaplingAt(replantSpot.get(3));
+				    }, 10);
+    	        }
+    	    }
+    	}
+    }
+	
+	public boolean breakBlockUnderCrosshair() {
+	    if (!(client.crosshairTarget instanceof BlockHitResult hit)) return false;
+	    if (client.player == null || client.interactionManager == null || client.world == null) return false;
+
+	    BlockPos pos = hit.getBlockPos();
+	    BlockState state = client.world.getBlockState(pos);
+	    Block block = state.getBlock();
+
+	    // Determine tool type
+	    String toolType = "";
+	    if (block.getDefaultState().isIn(BlockTags.PICKAXE_MINEABLE)) {
+	        toolType = "pickaxe";
+	    } else if (block.getDefaultState().isIn(BlockTags.AXE_MINEABLE)) {
+	        toolType = "_axe";
+	    } else if (block.getDefaultState().isIn(BlockTags.SHOVEL_MINEABLE)) {
+	        toolType = "shovel";
+	    } else if (block.getDefaultState().isIn(BlockTags.HOE_MINEABLE)) {
+	        toolType = "hoe";
+	    }
+
+	    // Equip tool
+	    if (!toolType.isEmpty()) {
+	        int toolSlot = getHighestPowerSlot(toolType);
+	        if (toolSlot != -1 && toolSlot != client.player.getInventory().getSelectedSlot()) {
+	            if (toolSlot < 9) {
+	                client.player.getInventory().setSelectedSlot(toolSlot);
+	            } else {
+	                swapSlots(toolSlot, 2);
+	                client.player.getInventory().setSelectedSlot(2);
+	            }
+	        }
+	    }
+
+	    // Break block
+	    client.interactionManager.attackBlock(pos, hit.getSide());
+	    client.player.swingHand(Hand.MAIN_HAND);
+	    breakingBlock = pos;
+	    breakingDirection = hit.getSide();
+
+	    return true;
+	}
+
+	
+	public boolean openVillagerTradeByUuid(UUID villagerId) {
+	    if (client.world == null || client.player == null) return false;
+
+	    Entity entity = client.world.getEntity(villagerId);
+	    if (entity instanceof VillagerEntity villager) {
+	        return openVillagerTrade(villager);
+	    }
+	    return false;
+	}
+
+	public boolean openVillagerTradeAtPos(BlockPos pos) {
+	    if (client.world == null || client.player == null) return false;
+
+	    double rangeSq = 5 * 5;
+	    for (Entity entity : client.world.getEntitiesByClass(VillagerEntity.class, new Box(pos).expand(1), v -> true)) {
+	        if (entity.squaredDistanceTo(client.player) <= rangeSq) {
+	            return openVillagerTrade((VillagerEntity) entity);
+	        }
+	    }
+	    return false;
+	}
+	
+	private boolean openVillagerTrade(VillagerEntity villager) {
+	    if (client.interactionManager == null || client.player == null) return false;
+
+	    // Must be close enough
+	    if (villager.squaredDistanceTo(client.player) > 25) return false;
+
+	    client.interactionManager.interactEntity(client.player, villager, Hand.MAIN_HAND);
+	    client.player.swingHand(Hand.MAIN_HAND);
+	    return true;
+	}
+	
+	public String performTrade(String matchOutput, String matchInput, int matchIndex) {
+	    if (!(client.player.currentScreenHandler instanceof MerchantScreenHandler handler)) {
+	        return "No trade screen open!";
+	    }
+
+	    List<TradeOffer> offers = handler.getRecipes();
+
+	    for (int i = 0; i < offers.size(); i++) {
+	        TradeOffer offer = offers.get(i);
+	        ItemStack sell = offer.getSellItem();
+	        ItemStack buyA = offer.getOriginalFirstBuyItem();
+	        Optional<TradedItem> buyB = offer.getSecondBuyItem();
+
+	        boolean matches = false;
+
+	        if (matchOutput != null && sell.getName().getString().toLowerCase().contains(matchOutput.toLowerCase())) {
+	            matches = true;
+	        }
+
+	        if (matchInput != null &&
+	            (buyA.getName().getString().toLowerCase().contains(matchInput.toLowerCase()) ||
+	             (buyB.isPresent() && buyB.get().itemStack().getName().getString().toLowerCase().contains(matchInput.toLowerCase())))) {
+	            matches = true;
+	        }
+
+	        if (matchIndex >= 0 && i == matchIndex) {
+	            matches = true;
+	        }
+
+	        if (matches) {
+	            selectTrade(i);
+	            completeTradeOutputClick();  // ⬅️ Perform the click to get the item
+	            return "Selected and performed trade index: " + i;
+	        }
+	    }
+
+	    return "No matching trade found.";
+	}
+
+	private void completeTradeOutputClick() {
+	    if (!(client.player.currentScreenHandler instanceof MerchantScreenHandler handler)) return;
+
+	    // The output slot is always index 2 in MerchantScreenHandler
+	    int outputSlot = 2;
+
+	    client.interactionManager.clickSlot(
+	        handler.syncId,
+	        outputSlot,
+	        0,
+	        SlotActionType.QUICK_MOVE,  // QUICK_MOVE simulates shift-clicking the result into your inventory
+	        client.player
+	    );
+	}
+	
+	private void selectTrade(int index) {
+	    if (!(client.player.currentScreenHandler instanceof MerchantScreenHandler handler)) return;
+
+	    client.player.networkHandler.sendPacket(new net.minecraft.network.packet.c2s.play.SelectMerchantTradeC2SPacket(index));
+	}
+
 	private static final Set<Item> FOOD_ITEMS = Set.of(
 		    Items.APPLE,
 		    Items.BREAD,
@@ -1087,7 +1459,7 @@ public class QueryClient {
 		return result;
 	}
 	
-	boolean chatDebug = true;
+	boolean chatDebug = false;
 	boolean usingBow = false;
 	
 	public JsonElement shootBowAt(LivingEntity target, float overshoot) {
@@ -1394,17 +1766,34 @@ public class QueryClient {
 	        return false;
 	    }
 	    
+
+	    boolean involvesOffhand = slot1 == 40 || slot2 == 40;
+	    
+	    if (involvesOffhand && (isHotbar(slot1) || isHotbar(slot2))) {
+	    	int prevSelectedSlot = client.player.getInventory().getSelectedSlot();
+	    	client.player.getInventory().setSelectedSlot(isHotbar(slot1) ? slot1 : slot2);
+	    	delayedTask(() -> {
+	    		client.getNetworkHandler().sendPacket(
+		    	        new PlayerActionC2SPacket(
+		    	            PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND,
+		    	            client.player.getBlockPos(),  // BlockPos is ignored for this action
+		    	            client.player.getHorizontalFacing()
+		    	        )
+		    	    );
+		    }, 5); // run 10 ticks later
+	    	
+	    	delayedTask(() -> {
+		        client.player.getInventory().setSelectedSlot(prevSelectedSlot);
+		    }, 10); // run 10 ticks later
+	        return true;
+	    }
 	    Screen prevScreen = client.currentScreen;
 	    
 	    client.setScreen(new InventoryScreen(client.player));
 	    
+
 	    if (isHotbar(slot1) && !isHotbar(slot2)) {
-	    	if (slot2 == 40) {
-	    		slot2 = 9;
-	    		delayedTask(() -> {
-	    	    	swapSlots(9, 40);
-	    	    }, 2); // run 2 ticks later
-	    	}
+	    	
 	    	client.interactionManager.clickSlot(
 	    	        client.player.currentScreenHandler.syncId,
 	    	        slot2,
@@ -1413,19 +1802,7 @@ public class QueryClient {
 	    	        client.player
 	    	    );
 	    } else if (isHotbar(slot2) && !isHotbar(slot1)) {
-	    	if (slot1 == 40) {
-	    		int ogSlot2 = slot2;
-	    		slot2 = 9;
-	    		// Click slot1 to pick up the item
-			    client.interactionManager.clickSlot(handler.syncId, slot1, 0, SlotActionType.PICKUP, client.player);
-			    // Click slot2 to swap
-			    client.interactionManager.clickSlot(handler.syncId, slot2, 0, SlotActionType.PICKUP, client.player);
-			    // Put the originally picked item back into slot1
-			    client.interactionManager.clickSlot(handler.syncId, slot1, 0, SlotActionType.PICKUP, client.player);
-	    		delayedTask(() -> {
-	    	    	swapSlots(9, ogSlot2);
-	    	    }, 2); // run 2 ticks later
-	    	} else {
+	    	
 		    	client.interactionManager.clickSlot(
 		    	        client.player.currentScreenHandler.syncId,
 		    	        slot1,
@@ -1433,7 +1810,6 @@ public class QueryClient {
 		    	        SlotActionType.SWAP,
 		    	        client.player
 		    	    );
-	    	}
 	    } else {
 	
 		    // Click slot1 to pick up the item
@@ -1464,13 +1840,13 @@ public class QueryClient {
 		    );
 	    }
 	    
-	    /*
+	    
 	    delayedTask(() -> {
-	    	client.execute(() -> client.setScreen(null));
+	    	client.execute(() -> client.setScreen(prevScreen));
 	    }, 1); // run 1 tick1 later
-	    */
+	    
 
-    	client.execute(() -> client.setScreen(prevScreen));
+    	//client.execute(() -> client.setScreen(prevScreen));
 
 	    return true;
 	}
@@ -1484,17 +1860,39 @@ public class QueryClient {
 	}
 
 	boolean isType(ItemStack stack, String type) {
-		
-		if (type.toLowerCase().contains("crossbow") && stack.getItem() == Items.CROSSBOW)
-			return true;
-		if (type.toLowerCase().contains("bow") && stack.getItem() == Items.BOW)
-			return true;
-		if (type.toLowerCase().contains("arrow") && (stack.getItem() == Items.ARROW || stack.getItem() == Items.TIPPED_ARROW || stack.getItem() == Items.SPECTRAL_ARROW))
-			return true;
-		if (stack.getItem().getName().getString().toLowerCase().contains(type))
-			return true;
-		return false;
+	    if (stack == null || stack.isEmpty()) return false;
+
+	    Item item = stack.getItem();
+	    String itemName = item.getTranslationKey().toLowerCase();
+	    type = type.toLowerCase();
+
+	    // Bows & Arrows
+	    if (type.contains("bow") && item == Items.BOW) return true;
+	    if (type.contains("crossbow") && item == Items.CROSSBOW) return true;
+	    if (type.contains("arrow") && (
+	        item == Items.ARROW ||
+	        item == Items.TIPPED_ARROW ||
+	        item == Items.SPECTRAL_ARROW)) return true;
+
+	    // Swords, Axes, Pickaxes, Shovels, Hoes
+	    if (type.contains("sword") && itemName.contains("sword")) return true;
+	    if (type.contains("axe") && itemName.contains("axe") && !itemName.contains("pickaxe")) return true;
+	    if (type.contains("pickaxe") && itemName.contains("pickaxe")) return true;
+	    if (type.contains("shovel") && itemName.contains("shovel")) return true;
+	    if (type.contains("hoe") && itemName.contains("hoe")) return true;
+
+	    // Armor
+	    if (type.contains("helmet") && itemName.contains("helmet")) return true;
+	    if (type.contains("chestplate") && itemName.contains("chestplate")) return true;
+	    if (type.contains("leggings") && itemName.contains("leggings")) return true;
+	    if (type.contains("boots") && itemName.contains("boots")) return true;
+
+	    // Generic fallback (optional)
+	    if (itemName.contains(type)) return true;
+
+	    return false;
 	}
+
 	
 	private int getHighestPowerSlot(String type) {
 		float power = -1;
@@ -1553,6 +1951,53 @@ public class QueryClient {
 		return result;
 	}
 	
+	private JsonElement openTableUnderCrosshair() {
+	    JsonObject result = new JsonObject();
+
+	    try {
+	        if (!(client.crosshairTarget instanceof BlockHitResult hit)) {
+	            result.addProperty("success", false);
+	            result.addProperty("error", "Not pointing at a block");
+	            return result;
+	        }
+
+	        BlockPos pos = hit.getBlockPos();
+	        BlockState state = client.world.getBlockState(pos);
+	        Block block = state.getBlock();
+
+	        if (block != Blocks.CRAFTING_TABLE) {
+	            result.addProperty("success", false);
+	            result.addProperty("error", "Not pointing at a crafting table (pointing at: " + block.toString() + ")");
+	            return result;
+	        }
+
+	        // Ensure player is close enough
+	        if (client.player.squaredDistanceTo(Vec3d.ofCenter(pos)) > 6 * 6) {
+	            result.addProperty("success", false);
+	            result.addProperty("error", "Too far away from crafting table");
+	            return result;
+	        }
+
+	        // Send interaction packet to server
+	        client.interactionManager.interactBlock(
+	            client.player,
+	            Hand.MAIN_HAND,
+	            hit
+	        );
+
+	        client.player.swingHand(Hand.MAIN_HAND);
+
+	        result.addProperty("success", true);
+	        result.addProperty("message", "Opened crafting table at " + pos);
+
+	    } catch (Exception e) {
+	        result.addProperty("success", false);
+	        result.addProperty("error", "Exception: " + e.getMessage());
+	    }
+
+	    return result;
+	}
+	
 	private boolean performAttack(Entity target) {
         if (target == null || client.player == null || client.interactionManager == null) return false;
 
@@ -1576,11 +2021,11 @@ public class QueryClient {
     int baritoneCooldown = 0;
     
     public boolean useShield(int ticks, LivingEntity target) {
-        if (client.player == null) return false;
+        if (client.player == null || client.interactionManager == null) return false;
 
         ItemStack offhand = client.player.getOffHandStack();
         if (!(offhand.getItem() instanceof ShieldItem)) {
-        	if (chatDebug) sendChatMessage("Equipping Shield");
+            if (chatDebug) sendChatMessage("Equipping Shield");
             offhand = equipShieldIfAvailable();
             if (!(offhand.getItem() instanceof ShieldItem)) {
                 if (chatDebug) sendChatMessage("No shield in offhand");
@@ -1589,20 +2034,18 @@ public class QueryClient {
         }
 
         if (!isOnCooldown(client.player, offhand)) {
-            // Actually start using the shield
-            client.player.setCurrentHand(Hand.OFF_HAND);
-            
+            // Aim at target for realism
             if (target != null) {
-            	lookAtEntity(client.player, target);
-            	delayedTask(() -> {
-            		lookAtEntity(client.player, target);
-                }, (int)(ticks*0.3));
-            	delayedTask(() -> {
-            		lookAtEntity(client.player, target);
-                }, (int)(ticks*0.6));
+                lookAtEntity(client.player, target);
+                delayedTask(() -> lookAtEntity(client.player, target), (int)(ticks * 0.3));
+                delayedTask(() -> lookAtEntity(client.player, target), (int)(ticks * 0.6));
             }
 
-            // Stop using after N ticks
+            // Actually block: server-side action
+            client.player.setCurrentHand(Hand.OFF_HAND);
+            client.interactionManager.interactItem(client.player, Hand.OFF_HAND);
+
+            // Stop after `ticks`
             delayedTask(() -> {
                 if (client.player.isUsingItem() && client.player.getActiveHand() == Hand.OFF_HAND) {
                     client.interactionManager.stopUsingItem(client.player);
@@ -1617,9 +2060,25 @@ public class QueryClient {
 
     int bowCooldown = 0;
     long currentTick = 0;
+    int shieldCooldown = 0;
+    int attackPhase = 0;
+    
+    private BlockPos breakingBlock = null;
+    private Direction breakingDirection = null;
     
 	public void tick() {
 		currentTick++;
+		treeTick();
+		if (breakingBlock != null && breakingDirection != null) {
+		    BlockState state = client.world.getBlockState(breakingBlock);
+		    if (!(state.isAir() || state.isLiquid())) {
+		        client.interactionManager.attackBlock(breakingBlock, breakingDirection);
+		        client.player.swingHand(Hand.MAIN_HAND);
+		    } else {
+		        breakingBlock = null;
+		        breakingDirection = null;
+		    }
+		}
 		if (delayedTasks.size() > 0) {
 			ArrayList<Runnable> remove = new ArrayList<>();
 			for (Runnable task : delayedTasks.keySet()) {
@@ -1650,6 +2109,13 @@ public class QueryClient {
         		bowCooldown--;
         		return;
         	} 
+        	if (shieldCooldown > 0) {
+        		shieldCooldown--;
+        		if (!isBlockingWithShield(client.player))
+        			shieldCooldown = 9;
+        		if (shieldCooldown > 10)
+        			return;
+        	}
 	        boolean hit = false;
 	        ArrayList<UUID> remove = new ArrayList<>();
 	        LivingEntity closestTarget = null;
@@ -1672,9 +2138,9 @@ public class QueryClient {
 	            }
 	        }
 	        if (closestTarget != null) {
-	        	if (distance < 6*6 || !killauraBow) {
+	        	if (distance < 9*9 || !killauraBow) {
 	        		if (chatDebug) sendChatMessage("Going in for the melee");
-	        		if (c % 6 == 0 && Math.random() > 0.5) {
+	        		if (c % 6 == 0 && Math.random() > 0.9 && shieldCooldown == 0 && attackPhase < 2) {
 	        			if (chatDebug) sendChatMessage("Trying to block");
 		        		shield = equipShieldIfAvailable();
 		        		if (shield == null) {
@@ -1682,16 +2148,22 @@ public class QueryClient {
 		        		}
 		        		else if (!isOnCooldown(client.player, shield)) {
 		        			if (chatDebug) sendChatMessage("Using shield");
-		        			useShield((int)(10*Math.random()*30), closestTarget);
+		        			int shieldDuration = (int)(10*Math.random()*30);
+	        				sendBaritoneCommand("stop");
+		        			if (useShield(shieldDuration, closestTarget)) {
+		        				shieldCooldown = (int)(shieldDuration*0.3) + 10;
+		        			}
 		        			return;
 		        		}
 	        		}
+	        		if (attackPhase > 0)
+	        			attackPhase--;
 			        hit = attack(closestTarget, useCrits);
 		            if (hit) {
 		            	hitCountDown = 5;
 		            	useCrits = false;
 		            }
-	        	} else if (killauraBow && hasLineOfSight && distance < 114*114 && bowCooldown == 0 && Math.random() > 0.5) {
+	        	} else if (attackPhase == 0 && killauraBow && hasLineOfSight && distance < 114*114 && bowCooldown == 0 && Math.random() > 0.8 && !(closestTarget instanceof PlayerEntity p && isBlockingWithShield(p))) {
 	        		if (chatDebug) sendChatMessage("Attempting to shoot bow");
 	        		boolean hasArrows = false;
 	        		for (int i = 0; i < client.player.getInventory().size(); i++) {
@@ -1709,7 +2181,7 @@ public class QueryClient {
 	        		if (hasArrows) {
 		        		if (chatDebug) sendChatMessage("Shooting the bow, cooldown = " + bowCooldown);
 	        			bowCooldown = 8;
-	        			sendChatMessage("new bow cooldown = " + bowCooldown);
+	        			//sendChatMessage("new bow cooldown = " + bowCooldown);
 	        			sendBaritoneCommand("stop");
 	        			shootBowAt(closestTarget, (float)Math.random()*2);
 	        			return;
@@ -1782,14 +2254,9 @@ public class QueryClient {
         for (int i = 0; i < client.player.getInventory().size(); i++) {
             ItemStack stack = client.player.getInventory().getStack(i);
             if (stack.getItem() instanceof ShieldItem) {
+            	swapSlots(i, 40);
                 // Swap with offhand
-                client.interactionManager.clickSlot(
-                    client.player.currentScreenHandler.syncId,
-                    i,
-                    40, // Offhand slot index
-                    SlotActionType.SWAP,
-                    client.player
-                );
+                
                 return stack;
             }
         }
@@ -1808,7 +2275,18 @@ public class QueryClient {
         // Face target
         lookAtEntity(client.player, target);
         
-        if (target.getPos().distanceTo(client.player.getPos()) < 2.5) isCrit = false; // Don't crit if too close
+        if (target.getPos().distanceTo(client.player.getPos()) < 2.5 && Math.random() > 0.3) isCrit = false; // Don't crit if too close
+
+        boolean useAxe = isCrit && Math.random() > 0.5;
+        
+        if (target instanceof PlayerEntity p) {
+            if (isBlockingWithShield(p)) {
+                useAxe = true;
+                //sendChatMessage("Using the axe to break the shield");
+            }
+        } else {
+        	//sendChatMessage("Not a player");
+        }
         
         if (!swapped) {
 	        int axeSlot = getHighestPowerSlot("_axe");
@@ -1820,17 +2298,10 @@ public class QueryClient {
 	        if (swordSlot == -1)
 	        	swordSlot = getHighestPowerSlot("hoe");
 	        
-	        boolean useAxe = isCrit && Math.random() > 0.5;
-	        
-	        if (target instanceof PlayerEntity p) {
-	            if (isBlockingWithShield(p)) {
-	                useAxe = true;
-	            }
-
-	        }
-	        
-	        if (axeSlot == -1)
+	        if (axeSlot == -1) {
 	        	useAxe = false;
+	        	//sendChatMessage("No axe in inventory");
+	        }
 	        
 	        int targetSlot = useAxe ? axeSlot : swordSlot;
 	        if (targetSlot == -1)
@@ -1851,7 +2322,7 @@ public class QueryClient {
         if (isCrit) {
         	if (client.player.isOnGround()) {
 	            client.player.jump();  // trigger jump
-	
+	            attackPhase = 10;
         	} else if (client.player.getVelocity().y < 0) { // Wait until falling (this example assumes this is in a tick loop or similar)
                 swapped = false;
         		return performAttack(target);
@@ -2414,6 +2885,38 @@ public class QueryClient {
 		return entitiesData;
 	}
 
+	private JsonObject getItemsAroundPlayer(int range) {
+		JsonObject entitiesData = new JsonObject();
+		List<JsonObject> entities = new ArrayList<>();
+
+		ClientPlayerEntity player = client.player;
+		ClientWorld world = client.world;
+
+		Box searchBox = new Box(player.getBlockPos()).expand(range);
+		List<ItemEntity> itemEntities = world.getEntitiesByClass(ItemEntity.class, searchBox,
+				entity -> (entity instanceof ItemEntity));
+
+		for (ItemEntity entity : itemEntities) {
+			try {
+				JsonObject entityData = new JsonObject();
+				entityData.addProperty("type", sanitizeString(entity.getType().toString()));
+				entityData.addProperty("name", sanitizeString(entity.getName().getString()));
+				entityData.addProperty("x", entity.getX());
+				entityData.addProperty("y", entity.getY());
+				entityData.addProperty("z", entity.getZ());
+				entityData.addProperty("uuid", entity.getUuidAsString());
+
+				entities.add(entityData);
+			} catch (Exception e) {
+				// Skip problematic entities but continue processing others
+			}
+		}
+
+		entitiesData.add("entities", gson.toJsonTree(entities));
+		return entitiesData;
+	}
+
+	
 	private JsonObject getWorldInfo() {
 		JsonObject worldInfo = new JsonObject();
 		ClientWorld world = client.world;
